@@ -11,6 +11,8 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.aiscalpingsniper.engine.BacktestEngine
+import com.aiscalpingsniper.engine.Candle
 import com.aiscalpingsniper.engine.CandleCsvParser
 import com.aiscalpingsniper.engine.ScannerEngine
 import com.aiscalpingsniper.engine.SetupStatus
@@ -25,6 +27,8 @@ class MainActivity : Activity() {
     private lateinit var timeframeInput: EditText
     private lateinit var resultText: TextView
     private val scanner = ScannerEngine()
+    private val backtester = BacktestEngine()
+    private var importedCandles: List<Candle> = emptyList()
     private val openCsvRequest = 4101
     private val maxCsvBytes = 20 * 1024 * 1024
 
@@ -45,6 +49,10 @@ class MainActivity : Activity() {
             text = "IMPORT OHLC CSV"
             setOnClickListener { chooseCsv() }
         }
+        val backtestButton = Button(this).apply {
+            text = "BACKTEST IMPORTED HISTORY"
+            setOnClickListener { runBacktest() }
+        }
         resultText = text(
             "MARKET DATA: NOT CONNECTED\n\nImport an OHLC CSV file to run a historical candle scan. Imported data is not live market data and will not trigger live alerts.",
             15f,
@@ -55,6 +63,7 @@ class MainActivity : Activity() {
         root.addView(symbolInput)
         root.addView(timeframeInput)
         root.addView(importButton)
+        root.addView(backtestButton)
         root.addView(resultText)
         setContentView(scroll)
     }
@@ -114,6 +123,7 @@ class MainActivity : Activity() {
         try {
             val csv = readCsvWithLimit(uri)
             val candles = CandleCsvParser.parse(csv)
+            importedCandles = candles
             val symbol = symbolInput.text.toString().trim().uppercase(Locale.ROOT)
             val timeframe = timeframeInput.text.toString().trim().uppercase(Locale.ROOT)
             require(symbol.isNotBlank() && timeframe.isNotBlank()) { "Enter a symbol and timeframe." }
@@ -146,6 +156,39 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun runBacktest() {
+        val candles = importedCandles
+        if (candles.isEmpty()) {
+            resultText.text = "Import a CSV file before running a backtest."
+            return
+        }
+        val symbol = symbolInput.text.toString().trim().uppercase(Locale.ROOT)
+        val timeframe = timeframeInput.text.toString().trim().uppercase(Locale.ROOT)
+        if (symbol.isBlank() || timeframe.isBlank()) {
+            resultText.text = "Enter a symbol and timeframe before backtesting."
+            return
+        }
+        try {
+            val report = backtester.run(symbol, timeframe, candles)
+            resultText.text = buildString {
+                append("HISTORICAL BACKTEST — IMPORTED CSV\n")
+                append("Symbol / timeframe: $symbol / $timeframe\n")
+                append("Candles: ${candles.size}\n")
+                append("Trades: ${report.trades.size}\n")
+                append("Skipped signals: ${report.skippedSignals}\n")
+                append("Win rate: ${report.winRatePercent}%\n")
+                append("Expectancy: ${report.expectancyR} R\n")
+                append("Profit factor: ${report.profitFactor}\n")
+                append("Maximum drawdown: ${report.maxDrawdownR} R\n")
+                append("\nExecution: next-bar open; stop-first if SL and TP both touch in one candle.")
+                append("\nHistorical results do not predict future profitability.")
+            }
+            resultText.setTextColor(Color.LTGRAY)
+        } catch (error: Exception) {
+            resultText.text = "BACKTEST FAILED\n" + (error.message ?: "Unknown error")
+            resultText.setTextColor(Color.rgb(255, 130, 130))
+        }
+    }
     private fun formatUtc(timestamp: Long): String =
         DateFormat.getDateTimeInstance().apply {
             timeZone = TimeZone.getTimeZone("UTC")
