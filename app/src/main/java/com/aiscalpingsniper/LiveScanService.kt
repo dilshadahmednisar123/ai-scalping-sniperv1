@@ -32,7 +32,16 @@ class LiveScanService : Service() {
         super.onCreate()
         createChannels()
         startForeground(ONGOING_ID, buildOngoing("Connecting to experimental market feed…"))
-        executor.scheduleWithFixedDelay({ scanOnce() }, 0, 60, TimeUnit.SECONDS)
+        executor.scheduleWithFixedDelay({
+            try {
+                scanOnce()
+            } catch (error: Exception) {
+                // Keep the periodic task alive after an unexpected cycle failure.
+                val detail = (error.message ?: error::class.java.simpleName).take(140)
+                getSystemService(NotificationManager::class.java)
+                    .notify(ONGOING_ID, buildOngoing("Scan cycle failed • retrying next cycle • " + detail))
+            }
+        }, 0, 60, TimeUnit.SECONDS)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -48,9 +57,17 @@ class LiveScanService : Service() {
         val watchlist = symbols.map { WatchlistInstrument(it, "M5", 300_000L) }
         val scan = scanner.scan(watchlist, System.currentTimeMillis(), candleLimit = 200)
         val healthy = scan.items.count { it.feedCheck.health == FeedHealth.HEALTHY }
+        val failures = scan.items.filter { it.feedCheck.health != FeedHealth.HEALTHY }
         val clock = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+        val failedSymbols = failures.joinToString { it.instrument.symbol + ": " + it.feedCheck.detail.take(55) }
+        val status = if (healthy == scan.items.size) {
+            "Experimental feed • " + healthy + "/" + scan.items.size + " healthy • " + clock
+        } else {
+            "Feed degraded • " + healthy + "/" + scan.items.size + " healthy • " + clock +
+                if (failedSymbols.isNotBlank()) " • " + failedSymbols else ""
+        }
         getSystemService(NotificationManager::class.java)
-            .notify(ONGOING_ID, buildOngoing("Experimental feed • " + healthy + "/" + scan.items.size + " healthy • " + clock))
+            .notify(ONGOING_ID, buildOngoing(status))
 
         scan.items.forEach { item ->
             val setup = item.scanResult?.setup
