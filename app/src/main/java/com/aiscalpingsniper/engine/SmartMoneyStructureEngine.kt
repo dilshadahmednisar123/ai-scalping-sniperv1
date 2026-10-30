@@ -1,7 +1,6 @@
 package com.aiscalpingsniper.engine
 
 import kotlin.math.max
-import kotlin.math.min
 
 data class PriceZone(val low: Double, val high: Double, val formedAt: Long) {
     init { require(low.isFinite() && high.isFinite() && low <= high) }
@@ -71,12 +70,12 @@ class SmartMoneyStructureEngine(private val config: SmartMoneyConfig = SmartMone
             val third = bars[i]
             if (third.low > first.high) {
                 val zone = PriceZone(first.high, third.low, third.timestamp)
-                val mitigated = bars.drop(i + 1).any { it.low <= zone.low }
+                val mitigated = bars.drop(i + 1).any { it.low <= zone.high }
                 if (!mitigated) bullishFvg = zone
             }
             if (third.high < first.low) {
                 val zone = PriceZone(third.high, first.low, third.timestamp)
-                val mitigated = bars.drop(i + 1).any { it.high >= zone.high }
+                val mitigated = bars.drop(i + 1).any { it.high >= zone.low }
                 if (!mitigated) bearishFvg = zone
             }
         }
