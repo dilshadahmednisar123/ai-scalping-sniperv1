@@ -17,6 +17,9 @@ import com.aiscalpingsniper.engine.FeedHealth
 import com.aiscalpingsniper.engine.SetupStatus
 import com.aiscalpingsniper.engine.WatchlistInstrument
 import com.aiscalpingsniper.engine.WatchlistScanner
+import com.aiscalpingsniper.engine.LiveQuoteFeed
+import com.aiscalpingsniper.engine.MarketUniverse
+import org.json.JSONArray
 import kotlin.math.abs
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -26,7 +29,8 @@ class LiveScanService : Service() {
     private val executor = Executors.newSingleThreadScheduledExecutor()
     private val provider by lazy { BiquoteMarketDataProvider() }
     private val scanner by lazy { WatchlistScanner(provider) }
-    private val symbols = listOf("EURUSD", "GBPUSD", "USDJPY", "XAUUSD")
+    private val quoteFeed by lazy { LiveQuoteFeed() }
+    private val symbols = MarketUniverse.forexPairs
 
     override fun onCreate() {
         super.onCreate()
@@ -54,18 +58,27 @@ class LiveScanService : Service() {
     }
 
     private fun scanOnce() {
+        val now = System.currentTimeMillis()
+        val quotes = quoteFeed.fetchUniverse(symbols, now)
+        val prefs = getSharedPreferences("live_scan", MODE_PRIVATE)
+        val quoteJson = JSONArray()
+        quotes.forEach { quoteJson.put(it.toJson()) }
+        prefs.edit().putString("universe_quotes_json", quoteJson.toString())
+            .putLong("universe_quotes_updated_at", now)
+            .putInt("universe_live_count", quotes.count { it.state.name == "LIVE" }).apply()
+
+        // Scan all requested instruments on M5. Quote snapshots are batched;
+        // candle and entry validation remains per-symbol and strict.
         val watchlist = symbols.map { WatchlistInstrument(it, "M5", 300_000L) }
-        val scan = scanner.scan(watchlist, System.currentTimeMillis(), candleLimit = 200)
+        val scan = scanner.scan(watchlist, now, candleLimit = 200)
         val healthy = scan.items.count { it.feedCheck.health == FeedHealth.HEALTHY }
         val failures = scan.items.filter { it.feedCheck.health != FeedHealth.HEALTHY }
         val clock = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
         val failedSymbols = failures.joinToString { it.instrument.symbol + ": " + it.feedCheck.detail.take(55) }
-        val status = if (healthy == scan.items.size) {
-            "Experimental feed • " + healthy + "/" + scan.items.size + " healthy • " + clock
-        } else {
-            "Feed degraded • " + healthy + "/" + scan.items.size + " healthy • " + clock +
-                if (failedSymbols.isNotBlank()) " • " + failedSymbols else ""
-        }
+        val liveQuotes = quotes.count { it.state.name == "LIVE" }
+        val status = "Quotes " + liveQuotes + "/" + symbols.size + " live • M5 candles " +
+            healthy + "/" + scan.items.size + " healthy • " + clock +
+            if (failedSymbols.isNotBlank()) " • " + failedSymbols.take(180) else ""
         getSystemService(NotificationManager::class.java)
             .notify(ONGOING_ID, buildOngoing(status))
 
@@ -80,7 +93,6 @@ class LiveScanService : Service() {
             if (abs(liveMid - setup.entry) > maxEntryDrift) return@forEach
             if (!higherTimeframesAgree(setup.direction, setup.symbol)) return@forEach
             val key = setup.symbol + "|" + setup.timeframe + "|" + setup.direction + "|" + setup.signalCandleTime
-            val prefs = getSharedPreferences("live_scan", MODE_PRIVATE)
             if (prefs.getString("last_signal_" + key, null) == "sent") return@forEach
             val title = setup.symbol + " " + setup.direction + " setup"
             val body = "M5 • Entry " + price(setup.symbol, setup.entry) +
