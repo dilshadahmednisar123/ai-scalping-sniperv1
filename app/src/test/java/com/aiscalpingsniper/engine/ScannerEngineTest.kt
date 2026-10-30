@@ -26,6 +26,27 @@ class ScannerEngineTest {
         assertTrue(result.message.contains("chronological"))
     }
 
+    @Test
+    fun confirmedSetupIncludesExplicitSmcEvidenceAndRuleScore() {
+        val candles = (0 until 60).map { i ->
+            val base = 100.0 + i * 0.08
+            when (i) {
+                55 -> Candle(i.toLong(), base + 0.1, base + 0.2, 100.0, base + 0.15)
+                56 -> Candle(i.toLong(), base + 0.15, base + 0.35, base + 0.10, base + 0.30)
+                57 -> Candle(i.toLong(), base + 0.30, base + 0.50, base + 0.25, base + 0.45)
+                58 -> Candle(i.toLong(), base + 0.45, base + 0.60, base + 0.40, base + 0.50)
+                59 -> Candle(i.toLong(), base + 0.50, base + 1.20, 100.01, base + 1.10)
+                else -> Candle(i.toLong(), base, base + 0.18, base - 0.18, base + 0.08)
+            }
+        }
+        val result = ScannerEngine().scan("EURUSD", "M5", candles)
+        assertTrue("Expected a setup candidate, got: ${result.message}", result.setup != null)
+        val evidence = result.setup!!.reasons.joinToString(" | ")
+        assertTrue(evidence.contains("SMC:"))
+        assertTrue(evidence.contains("liquidity sweep"))
+        assertTrue(result.setup!!.score in 0..100)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun rejectsInvalidOhlcRange() {
         Candle(1L, 100.0, 99.0, 98.0, 100.5)
