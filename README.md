@@ -42,3 +42,10 @@ GitHub Actions builds a debug APK and uploads it as an artifact when the workflo
 5. Validate strategy performance before presenting any signal as trade-ready.
 
 This software is for research and education, not financial advice. Always verify market data and risk independently.
+
+## Smart-money structure context (experimental)
+
+- `SmartMoneyStructureEngine` reports confirmed swing highs/lows, close-based BOS, wick-and-close liquidity sweeps, three-candle FVG zones and a mechanical last-opposite-candle order-block proxy.
+- Pivot levels are unavailable until the configured right-side confirmation candles have closed. The engine therefore avoids using unconfirmed future pivots.
+- FVG mitigation is flagged when price first retraces into the zone. Order-block identification is a transparent heuristic, not proof of institutional orders.
+- This context module is currently separate from the baseline signal decision. It is not yet a complete or validated SMC strategy and must not be treated as an automatic entry signal.
