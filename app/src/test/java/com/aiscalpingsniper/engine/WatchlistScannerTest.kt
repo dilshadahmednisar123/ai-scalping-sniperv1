@@ -60,6 +60,33 @@ class WatchlistScannerTest {
         assertNull(result.items.single().scanResult)
     }
 
+    @Test
+    fun rejectsBatchWithoutBidAskTick() {
+        val provider = object : MarketDataProvider {
+            override fun fetch(symbol: String, timeframe: String, limit: Int) =
+                batch(symbol).copy(bid = null, ask = null, tickTimestampMillis = null, spread = null)
+        }
+        val now = batch("EURUSD").fetchedAtMillis + 1_000L
+        val result = WatchlistScanner(provider).scan(listOf(watchlist.first()), now)
+        assertEquals(FeedHealth.INVALID, result.items.single().feedCheck.health)
+        assertTrue(result.items.single().feedCheck.detail.contains("bid/ask"))
+        assertNull(result.items.single().scanResult)
+    }
+
+    @Test
+    fun rejectsStaleBidAskTick() {
+        val provider = object : MarketDataProvider {
+            override fun fetch(symbol: String, timeframe: String, limit: Int): MarketDataBatch {
+                val data = batch(symbol)
+                return data.copy(tickTimestampMillis = data.fetchedAtMillis - 200_000L)
+            }
+        }
+        val now = batch("EURUSD").fetchedAtMillis + 1_000L
+        val result = WatchlistScanner(provider).scan(listOf(watchlist.first()), now)
+        assertEquals(FeedHealth.STALE, result.items.single().feedCheck.health)
+        assertNull(result.items.single().scanResult)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun rejectsDuplicateWatchlistEntries() {
         val provider = object : MarketDataProvider {
