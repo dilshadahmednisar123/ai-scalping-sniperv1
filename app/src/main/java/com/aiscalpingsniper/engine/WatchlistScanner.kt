@@ -60,7 +60,7 @@ class WatchlistScanner(
         val results = watchlist.map { instrument ->
             try {
                 val batch = provider.fetch(instrument.symbol, instrument.timeframe, candleLimit)
-                val health = quality.validate(batch, nowMillis, instrument.expectedIntervalMillis)
+                // A provider timestamps its batch when the response completes, which can\n                // be later than the scan cycle start. Validate against the later instant.\n                val validationTime = maxOf(nowMillis, batch.fetchedAtMillis)\n                val health = quality.validate(batch, validationTime, instrument.expectedIntervalMillis)
                 if (health.health != FeedHealth.HEALTHY) {
                     InstrumentScan(instrument, health)
                 } else if (!batch.symbol.equals(instrument.symbol, ignoreCase = true) ||
