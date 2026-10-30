@@ -9,6 +9,8 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -43,6 +45,13 @@ class MainActivity : Activity() {
     private lateinit var scanStatus: TextView
     private lateinit var feedStatus: TextView
     private lateinit var watchlistPanel: LinearLayout
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private val quoteRefresh = object : Runnable {
+        override fun run() {
+            if (::watchlistPanel.isInitialized) renderWatchlist()
+            uiHandler.postDelayed(this, 5_000L)
+        }
+    }
     private val scanner = ScannerEngine()
     private val backtester = BacktestEngine()
     private var importedCandles: List<Candle> = emptyList()
@@ -169,7 +178,16 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (::watchlistPanel.isInitialized) renderWatchlist()
+        if (::watchlistPanel.isInitialized) {
+            renderWatchlist()
+            uiHandler.removeCallbacks(quoteRefresh)
+            uiHandler.post(quoteRefresh)
+        }
+    }
+
+    override fun onPause() {
+        uiHandler.removeCallbacks(quoteRefresh)
+        super.onPause()
     }
 
     private fun renderWatchlist() {
