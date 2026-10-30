@@ -11,8 +11,8 @@ android {
         applicationId = "com.aiscalpingsniper"
         minSdk = 23
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     compileOptions {
@@ -29,6 +29,7 @@ android {
     }
 }
 
-dependencies {\n    implementation("androidx.core:core:1.15.0")
+dependencies {
+    implementation("androidx.core:core:1.15.0")
     testImplementation("junit:junit:4.13.2")
 }
