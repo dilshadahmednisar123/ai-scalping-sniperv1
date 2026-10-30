@@ -11,16 +11,22 @@ class WatchlistScannerTest {
         WatchlistInstrument("XAUUSD", "M5", 300_000L)
     )
 
-    private fun batch(symbol: String) = MarketDataBatch(
-        source = "TEST_FIXTURE",
-        symbol = symbol,
-        timeframe = "M5",
-        fetchedAtMillis = 1_000_000L,
-        candles = (0 until 5).map { index ->
-            val price = 1.0 + index * 0.001
-            Candle(index * 300_000L + 1L, price, price + 0.002, price - 0.002, price + 0.001)
-        }
-    )
+    private fun candles() = (0 until 60).map { index ->
+        val price = 1.0 + index * 0.001
+        Candle(1_000_000L + index * 300_000L, price, price + 0.002, price - 0.002, price + 0.001)
+    }
+
+    private fun batch(symbol: String): MarketDataBatch {
+        val data = candles()
+        val now = data.last().timestamp + 300_000L + 30_000L
+        return MarketDataBatch(
+            source = "TEST_FIXTURE",
+            symbol = symbol,
+            timeframe = "M5",
+            fetchedAtMillis = now - 1_000L,
+            candles = data
+        )
+    }
 
     @Test
     fun isolatesProviderFailureAndContinuesOtherSymbols() {
@@ -30,7 +36,8 @@ class WatchlistScannerTest {
                 return batch(symbol)
             }
         }
-        val result = WatchlistScanner(provider).scan(watchlist, nowMillis = 1_030_000L)
+        val now = batch("XAUUSD").fetchedAtMillis + 1_000L
+        val result = WatchlistScanner(provider).scan(watchlist, nowMillis = now)
         assertEquals(2, result.items.size)
         assertEquals(FeedHealth.INVALID, result.items[0].feedCheck.health)
         assertTrue(result.items[0].feedCheck.detail.contains("source unavailable"))
@@ -43,7 +50,8 @@ class WatchlistScannerTest {
         val provider = object : MarketDataProvider {
             override fun fetch(symbol: String, timeframe: String, limit: Int) = batch("GBPUSD")
         }
-        val result = WatchlistScanner(provider).scan(listOf(watchlist.first()), 1_030_000L)
+        val now = batch("GBPUSD").fetchedAtMillis + 1_000L
+        val result = WatchlistScanner(provider).scan(listOf(watchlist.first()), now)
         assertEquals(FeedHealth.INVALID, result.items.single().feedCheck.health)
         assertNull(result.items.single().scanResult)
     }
