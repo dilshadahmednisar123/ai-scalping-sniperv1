@@ -50,6 +50,19 @@ class WatchlistScannerTest {
     }
 
     @Test
+    fun rejectsFutureDatedFetchTimestampInsteadOfAdvancingValidationClock() {
+        val provider = object : MarketDataProvider {
+            override fun fetch(symbol: String, timeframe: String, limit: Int) = batch(symbol)
+        }
+        val futureBatch = batch("EURUSD")
+        val scanClock = futureBatch.fetchedAtMillis - 1_000L
+        val result = WatchlistScanner(provider).scan(listOf(watchlist.first()), scanClock)
+        assertEquals(FeedHealth.INVALID, result.items.single().feedCheck.health)
+        assertTrue(result.items.single().feedCheck.detail.contains("timestamps"))
+        assertNull(result.items.single().scanResult)
+    }
+
+    @Test
     fun rejectsProviderReturningWrongSymbol() {
         val provider = object : MarketDataProvider {
             override fun fetch(symbol: String, timeframe: String, limit: Int) = batch("GBPUSD")
