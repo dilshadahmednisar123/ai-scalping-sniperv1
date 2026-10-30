@@ -19,7 +19,9 @@ data class WatchlistInstrument(
 data class InstrumentScan(
     val instrument: WatchlistInstrument,
     val feedCheck: FeedCheck,
-    val scanResult: ScanResult? = null
+    val scanResult: ScanResult? = null,
+    val currentBid: Double? = null,
+    val currentAsk: Double? = null
 )
 
 data class WatchlistScan(val scannedAtMillis: Long, val items: List<InstrumentScan>) {
@@ -53,6 +55,8 @@ class WatchlistScanner(
                 val health = quality.validate(batch, validationTime, instrument.expectedIntervalMillis)
                 if (health.health != FeedHealth.HEALTHY) {
                     InstrumentScan(instrument, health)
+                } else if (batch.bid == null || batch.ask == null || batch.tickTimestampMillis == null) {
+                    InstrumentScan(instrument, FeedCheck(FeedHealth.INVALID, "Provider did not supply a fresh bid/ask tick."))
                 } else if (!batch.symbol.equals(instrument.symbol, ignoreCase = true) ||
                     !batch.timeframe.equals(instrument.timeframe, ignoreCase = true)) {
                     InstrumentScan(
@@ -63,7 +67,9 @@ class WatchlistScanner(
                     InstrumentScan(
                         instrument,
                         health,
-                        scanner.scan(instrument.symbol, instrument.timeframe, batch.candles)
+                        scanner.scan(instrument.symbol, instrument.timeframe, batch.candles),
+                        batch.bid,
+                        batch.ask
                     )
                 }
             } catch (error: Exception) {
