@@ -8,7 +8,7 @@ A user-started Android foreground service now polls the public **biquote.io** OH
 
 - Watchlist: EURUSD, GBPUSD, USDJPY and XAUUSD.
 - Timeframe: M5 closed candles.
-- Poll cycle: approximately every 60 seconds.
+- Poll cycle: approximately every 60 seconds.\n- Alert confluence: M5 setup plus closed M15 and H1 EMA50 directional alignment.
 - Signal delivery: Android notifications, deduplicated by symbol/timeframe/direction/signal-candle timestamp.
 - Feed checks: source identity, symbol/timeframe identity, strictly increasing timestamps, candle gaps, fetch age, latest closed-candle age, and a fresh bid/ask tick.
 - Failed, stale, incomplete or malformed feeds are rejected; they do not produce a signal.
