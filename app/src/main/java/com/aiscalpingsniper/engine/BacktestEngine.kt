@@ -195,7 +195,7 @@ class BacktestEngine(
                 val fill = if (setup.direction == Direction.LONG) {
                     rawExit - exitCost
                 } else {
-                    rawExit + config.executionCostPerSide
+                    rawExit + exitCost
                 }
                 return Exit(i, fill, ExitReason.STOP_LOSS)
             }
@@ -206,9 +206,9 @@ class BacktestEngine(
                     minOf(setup.takeProfit, bar.open)
                 }
                 val fill = if (setup.direction == Direction.LONG) {
-                    rawExit - config.executionCostPerSide
+                    rawExit - exitCost
                 } else {
-                    rawExit + config.executionCostPerSide
+                    rawExit + exitCost
                 }
                 return Exit(i, fill, ExitReason.TAKE_PROFIT)
             }
@@ -217,9 +217,9 @@ class BacktestEngine(
         val bar = candles[lastIndex]
         val rawExit = bar.close
         val fill = if (setup.direction == Direction.LONG) {
-            rawExit - config.executionCostPerSide
+            rawExit - exitCost
         } else {
-            rawExit + config.executionCostPerSide
+            rawExit + exitCost
         }
         return Exit(lastIndex, fill, ExitReason.TIME_EXIT)
     }
