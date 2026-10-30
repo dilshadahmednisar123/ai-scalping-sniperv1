@@ -44,6 +44,7 @@ class MainActivity : Activity() {
     private lateinit var historyText: TextView
     private lateinit var scanStatus: TextView
     private lateinit var feedStatus: TextView
+    private lateinit var headlineStatus: TextView
     private lateinit var watchlistPanel: LinearLayout
     private val uiHandler = Handler(Looper.getMainLooper())
     private val quoteRefresh = object : Runnable {
@@ -111,8 +112,8 @@ class MainActivity : Activity() {
             pill("EXPERIMENTAL FEED", Color.rgb(255, 183, 77))
         ))
         hero.addView(space(13))
-        val headline = label("Scanner initializing", 21, white, true)
-        hero.addView(headline)
+        headlineStatus = label("Scanner initializing", 21, white, true)
+        hero.addView(headlineStatus)
         feedStatus = label("No trusted live quote is currently confirmed. Prices and signals are hidden until feed checks pass.", 12, muted)
         hero.addView(space(6))
         hero.addView(feedStatus)
@@ -257,6 +258,8 @@ class MainActivity : Activity() {
         if (updated > 0L) {
             val liveCount = prefs.getInt("universe_live_count", 0)
             val verified = prefs.getBoolean("market_data_verified", false)
+            headlineStatus.text = if (verified) "VERIFIED • SCANNING ACTIVE" else "SCANNING ACTIVE • PARTIAL FEED"
+            headlineStatus.setTextColor(if (verified) green else Color.rgb(255, 183, 77))
             feedStatus.text = "Quote snapshot updated " + DateFormat.getTimeInstance(DateFormat.MEDIUM)
                 .format(Date(updated)) + " • " + liveCount + "/" + MarketUniverse.forexPairs.size +
                 " live quotes • " + (if (verified) "VERIFIED • SCANNING ACTIVE" else "SCANNING ACTIVE • PARTIAL FEED") +
