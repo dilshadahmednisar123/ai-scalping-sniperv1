@@ -75,7 +75,20 @@ class LiveScanService : Service() {
     private fun collectMatrixAndRank() {
         val prefs = getSharedPreferences("live_scan", MODE_PRIVATE)
         val collector = SevenTimeframeCollector(provider)
-        val frames = try { collector.collect(symbols) } finally { collector.close() }
+        val coreFrames = collector.collect(symbols, listOf("M5", "M15", "H1"))
+        val coreByPair = coreFrames.filter { it.status == "LIVE" }
+            .groupBy { it.symbol }
+            .mapValues { (_, rows) -> rows.associate { it.timeframe to it.candles } }
+        val coreReport = MarketOpportunityEngine().analyze(symbols, coreByPair)
+        val coreHealthy = coreFrames.count { it.status == "LIVE" }
+        prefs.edit().putInt("matrix_healthy_frames", coreHealthy)
+            .putInt("matrix_total_frames", symbols.size * MarketUniverse.timeframes.size)
+            .putString("matrix_status", "PARTIAL • CORE M5/M15/H1 • " + coreHealthy + "/" +
+                (symbols.size * 3) + " core frames; extended timeframes loading")
+            .apply()
+        val remainingFrames = collector.collect(symbols, listOf("M1", "M30", "H4", "D1"))
+        collector.close()
+        val frames = coreFrames + remainingFrames
         val byPair = frames.filter { it.status == "LIVE" }
             .groupBy { it.symbol }
             .mapValues { (_, rows) -> rows.associate { it.timeframe to it.candles } }
