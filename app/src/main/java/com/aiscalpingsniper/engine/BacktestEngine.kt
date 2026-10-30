@@ -81,10 +81,20 @@ class BacktestEngine(
                 index++
                 continue
             }
-            val rawRisk = abs(setup.entry - setup.stopLoss)
-            if (rawRisk <= 0.0 || !rawRisk.isFinite()) {
+            val rawRisk = abs(entryFill - setup.stopLoss)
+            val entryBeyondTarget = if (setup.direction == Direction.LONG) {
+                entryFill >= setup.takeProfit
+            } else {
+                entryFill <= setup.takeProfit
+            }
+            val entryThroughStop = if (setup.direction == Direction.LONG) {
+                entryFill <= setup.stopLoss
+            } else {
+                entryFill >= setup.stopLoss
+            }
+            if (rawRisk <= 0.0 || !rawRisk.isFinite() || entryBeyondTarget || entryThroughStop) {
                 skipped++
-                index = exit.index + 1
+                index++
                 continue
             }
             val netMove = if (setup.direction == Direction.LONG) {
