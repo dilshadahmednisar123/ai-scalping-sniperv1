@@ -6,62 +6,59 @@ import org.junit.Test
 
 class MarketDataQualityTest {
     private val quality = MarketDataQuality()
-    private fun candles(count: Int = 4, step: Long = 60_000L) =
+    private val interval = 60_000L
+    private val now = 4_630_000L
+    private fun candles(count: Int = 60, step: Long = interval) =
         (0 until count).map { i ->
             val price = 1.0 + i * 0.001
-            Candle(i * step + 1L, price, price + 0.002, price - 0.002, price + 0.001, 10.0)
+            Candle(i * step + 1_000L, price, price + 0.002, price - 0.002, price + 0.001, 10.0)
         }
+    private fun batch(candles: List<Candle> = candles(), fetchedAt: Long = now - 1_000L, spread: Double? = 0.0001) =
+        MarketDataBatch("CSV_IMPORT", "EURUSD", "M1", fetchedAt, candles, spread)
 
-    private fun batch(
-        candles: List<Candle> = candles(),
-        fetchedAt: Long = 1_000_000L,
-        spread: Double? = 0.0001
-    ) = MarketDataBatch("CSV_IMPORT", "EURUSD", "M1", fetchedAt, candles, spread)
-
-    @Test
-    fun acceptsFreshChronologicalFeed() {
-        val result = quality.validate(batch(), nowMillis = 1_030_000L, expectedIntervalMillis = 60_000L)
-        assertEquals(FeedHealth.HEALTHY, result.health)
+    @Test fun acceptsFreshChronologicalFeed() {
+        val data = candles()
+        val currentTime = data.last().timestamp + interval + 30_000L
+        assertEquals(FeedHealth.HEALTHY, quality.validate(batch(data, currentTime - 1_000L), currentTime, interval).health)
     }
-
-    @Test
-    fun marksOldFeedStale() {
-        val result = quality.validate(batch(), nowMillis = 1_200_001L, expectedIntervalMillis = 60_000L)
+    @Test fun marksOldFetchStale() {
+        val data = candles()
+        val currentTime = data.last().timestamp + interval + 30_000L
+        assertEquals(FeedHealth.STALE, quality.validate(batch(data, currentTime - 200_000L), currentTime, interval).health)
+    }
+    @Test fun marksOldLatestCandleStaleEvenAfterFreshFetch() {
+        val data = candles().map { it.copy(timestamp = it.timestamp - 600_000L) }
+        val currentTime = candles().last().timestamp + interval + 30_000L
+        val result = quality.validate(batch(data, currentTime - 1_000L), currentTime, interval)
         assertEquals(FeedHealth.STALE, result.health)
+        assertTrue(result.detail.contains("candle"))
     }
-
-    @Test
-    fun rejectsOutOfOrderCandles() {
+    @Test fun rejectsOutOfOrderCandles() {
         val ordered = candles()
-        val invalid = listOf(ordered[0], ordered[2], ordered[1], ordered[3])
-        val result = quality.validate(batch(candles = invalid), 1_030_000L, 60_000L)
-        assertEquals(FeedHealth.INVALID, result.health)
+        val invalid = listOf(ordered[0], ordered[2], ordered[1]) + ordered.drop(3)
+        val currentTime = ordered.last().timestamp + interval + 30_000L
+        assertEquals(FeedHealth.INVALID, quality.validate(batch(invalid, currentTime - 1_000L), currentTime, interval).health)
     }
-
-    @Test
-    fun rejectsLargeCandleGap() {
+    @Test fun rejectsLargeCandleGap() {
         val invalid = candles(step = 300_000L)
-        val result = quality.validate(batch(candles = invalid), 1_030_000L, 60_000L)
+        val currentTime = invalid.last().timestamp + interval + 30_000L
+        val result = quality.validate(batch(invalid, currentTime - 1_000L), currentTime, interval)
         assertEquals(FeedHealth.INVALID, result.health)
         assertTrue(result.detail.contains("gap"))
     }
-
-    @Test
-    fun rejectsNegativeSpread() {
-        val result = quality.validate(batch(spread = -0.1), 1_030_000L, 60_000L)
-        assertEquals(FeedHealth.INVALID, result.health)
+    @Test fun rejectsNegativeSpread() {
+        val data = candles()
+        val currentTime = data.last().timestamp + interval + 30_000L
+        assertEquals(FeedHealth.INVALID, quality.validate(batch(data, currentTime - 1_000L, -0.1), currentTime, interval).health)
     }
-
-    @Test
-    fun rejectsMissingFeedIdentity() {
-        val invalid = MarketDataBatch("", "EURUSD", "M1", 1_000_000L, candles())
-        val result = quality.validate(invalid, 1_030_000L, 60_000L)
-        assertEquals(FeedHealth.INVALID, result.health)
+    @Test fun rejectsMissingFeedIdentity() {
+        val data = candles()
+        val currentTime = data.last().timestamp + interval + 30_000L
+        assertEquals(FeedHealth.INVALID, quality.validate(MarketDataBatch("", "EURUSD", "M1", currentTime - 1_000L, data), currentTime, interval).health)
     }
-
-    @Test
-    fun reportsInsufficientCandles() {
-        val result = quality.validate(batch(candles = candles(count = 2)), 1_030_000L, 60_000L)
-        assertEquals(FeedHealth.INSUFFICIENT, result.health)
+    @Test fun reportsInsufficientCandles() {
+        val data = candles(count = 2)
+        val currentTime = data.last().timestamp + interval + 30_000L
+        assertEquals(FeedHealth.INSUFFICIENT, quality.validate(batch(data, currentTime - 1_000L), currentTime, interval).health)
     }
 }
