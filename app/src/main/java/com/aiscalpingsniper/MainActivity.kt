@@ -1,40 +1,237 @@
 package com.aiscalpingsniper
 
 import android.app.Activity
-import android.os.Bundle
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
 import android.view.Gravity
+import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
+import com.aiscalpingsniper.engine.BacktestEngine
+import com.aiscalpingsniper.engine.Candle
+import com.aiscalpingsniper.engine.CandleCsvParser
+import com.aiscalpingsniper.engine.ScannerEngine
+import com.aiscalpingsniper.engine.SetupStatus
+import java.io.ByteArrayOutputStream
+import java.text.DateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 class MainActivity : Activity() {
+    private lateinit var symbolInput: EditText
+    private lateinit var timeframeInput: EditText
+    private lateinit var resultText: TextView
+    private val scanner = ScannerEngine()
+    private val backtester = BacktestEngine()
+    private var importedCandles: List<Candle> = emptyList()
+    private val openCsvRequest = 4101
+    private val notificationRequest = 4102
+    private val maxCsvBytes = 20 * 1024 * 1024
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(32, 32, 32, 32)
+            setPadding(24, 28, 24, 24)
             setBackgroundColor(Color.rgb(12, 18, 30))
         }
+        val scroll = ScrollView(this).apply { addView(root) }
+        root.addView(text("AI SCALPING SNIPER", 25f, Color.WHITE))
+        root.addView(text("LIVE SCANNER • V1.2 • EXPERIMENTAL DATA", 13f, Color.rgb(126, 190, 255)))
+        symbolInput = field("Symbol (e.g. EURUSD)", "EURUSD")
+        timeframeInput = field("Timeframe (e.g. M5)", "M5")
+        root.addView(symbolInput)
+        root.addView(timeframeInput)
+        root.addView(Button(this).apply {
+            text = "START LIVE SCANNER (M5)"
+            setOnClickListener { requestNotificationAndStart() }
+        })
+        root.addView(Button(this).apply {
+            text = "STOP LIVE SCANNER"
+            setOnClickListener { stopService(Intent(this@MainActivity, LiveScanService::class.java)) }
+        })
+        root.addView(Button(this).apply {
+            text = "IMPORT OHLC CSV"
+            setOnClickListener { chooseCsv() }
+        })
+        root.addView(Button(this).apply {
+            text = "BACKTEST IMPORTED HISTORY"
+            setOnClickListener { runBacktest() }
+        })
+        resultText = text(
+            "LIVE DATA: STOPPED\n\nStart the experimental M5 scanner for EURUSD, GBPUSD, USDJPY and XAUUSD. Or import a historical OHLC CSV. Live data is third-party and must be checked against your broker.",
+            15f, Color.LTGRAY
+        )
+        root.addView(resultText)
+        setContentView(scroll)
+    }
 
-        val title = TextView(this).apply {
-            text = "AI SCALPING SNIPER"
-            textSize = 25f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
+    private fun text(value: String, size: Float, color: Int) = TextView(this).apply {
+        text = value
+        textSize = size
+        setTextColor(color)
+        gravity = Gravity.CENTER_HORIZONTAL
+        setPadding(0, 14, 0, 14)
+    }
+
+    private fun field(hintText: String, initial: String) = EditText(this).apply {
+        hint = hintText
+        setText(initial)
+        setSingleLine(true)
+        setTextColor(Color.WHITE)
+        setHintTextColor(Color.GRAY)
+        setPadding(14, 10, 14, 10)
+    }
+
+    private fun requestNotificationAndStart() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), notificationRequest)
+            return
         }
+        startLiveScanner()
+    }
 
-        val status = TextView(this).apply {
-            text = "V1 • Scanner not connected yet\n\nThis is the initial app shell. Live signals will only be enabled after a reliable market-data feed and strategy validation are implemented."
-            textSize = 16f
-            setTextColor(Color.LTGRAY)
-            gravity = Gravity.CENTER
-            setPadding(0, 24, 0, 0)
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == notificationRequest) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                startLiveScanner()
+            } else {
+                resultText.text = "Notifications are required for live signal alerts. Enable notifications for this app in Android settings, then start the scanner again."
+            }
         }
+    }
 
-        root.addView(title)
-        root.addView(status)
-        setContentView(root)
+    private fun startLiveScanner() {
+        val intent = Intent(this, LiveScanService::class.java).setAction(LiveScanService.ACTION_START)
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+        resultText.text = "LIVE SCANNER STARTED\nSource: biquote.io experimental public feed\nWatchlist: EURUSD, GBPUSD, USDJPY, XAUUSD\nTimeframe: M5\nPoll interval: 60 seconds\nKeep the persistent notification visible. Android may stop long-running services. Verify every signal against your broker and spread."
+        resultText.setTextColor(Color.rgb(126, 190, 255))
+    }
+
+    private fun chooseCsv() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/*"
+        }
+        startActivityForResult(intent, openCsvRequest)
+    }
+
+    @Deprecated("Uses the platform document picker for broad Android compatibility.")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != openCsvRequest || resultCode != RESULT_OK) return
+        val uri: Uri = data?.data ?: return
+        importAndScan(uri)
+    }
+
+    private fun readCsvWithLimit(uri: Uri): String {
+        val input = contentResolver.openInputStream(uri) ?: error("Could not open the selected file.")
+        input.use { stream ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(8 * 1024)
+            var total = 0
+            while (true) {
+                val count = stream.read(buffer)
+                if (count < 0) break
+                total += count
+                require(total <= maxCsvBytes) { "CSV is larger than the 20 MB import limit." }
+                output.write(buffer, 0, count)
+            }
+            return String(output.toByteArray(), Charsets.UTF_8)
+        }
+    }
+
+    private fun importAndScan(uri: Uri) {
+        resultText.text = "Reading CSV…"
+        try {
+            val candles = CandleCsvParser.parse(readCsvWithLimit(uri))
+            importedCandles = candles
+            val symbol = symbolInput.text.toString().trim().uppercase(Locale.ROOT)
+            val timeframe = timeframeInput.text.toString().trim().uppercase(Locale.ROOT)
+            require(symbol.isNotBlank() && timeframe.isNotBlank()) { "Enter a symbol and timeframe." }
+            val result = scanner.scan(symbol, timeframe, candles)
+            val setup = result.setup
+            resultText.text = buildString {
+                append("DATA SOURCE: IMPORTED CSV (HISTORICAL)\n")
+                append("CANDLES LOADED: " + candles.size + "\n")
+                append("LAST CANDLE (UTC): " + formatUtc(candles.last().timestamp) + "\n")
+                append("SYMBOL / TF: " + symbol + " / " + timeframe + "\n\n")
+                append("SCAN STATUS: " + result.status + "\n" + result.message)
+                if (setup != null) {
+                    append("\n\n" + setup.direction + " CANDIDATE\n")
+                    append("Entry: " + formatPrice(symbol, setup.entry) + "\n")
+                    append("Stop loss: " + formatPrice(symbol, setup.stopLoss) + "\n")
+                    append("Take profit: " + formatPrice(symbol, setup.takeProfit) + "\n")
+                    append("Risk/reward: 1:" + setup.riskReward + "\n")
+                    append("Rule score: " + setup.score + "/100 (not win probability)\n")
+                    append("Signal candle UTC: " + formatUtc(setup.signalCandleTime) + "\n")
+                    append("\nReasons:\n• " + setup.reasons.joinToString("\n• "))
+                }
+                append("\n\nHISTORICAL IMPORT ONLY — no live feed or automatic trade execution.")
+            }
+            resultText.setTextColor(if (result.status == SetupStatus.CONFIRMED) Color.rgb(120, 230, 160) else Color.LTGRAY)
+        } catch (error: Exception) {
+            resultText.text = "CSV IMPORT FAILED\n" + (error.message ?: "Unknown error")
+            resultText.setTextColor(Color.rgb(255, 130, 130))
+        }
+    }
+
+    private fun runBacktest() {
+        val candles = importedCandles
+        if (candles.isEmpty()) {
+            resultText.text = "Import a CSV file before running a backtest."
+            return
+        }
+        val symbol = symbolInput.text.toString().trim().uppercase(Locale.ROOT)
+        val timeframe = timeframeInput.text.toString().trim().uppercase(Locale.ROOT)
+        if (symbol.isBlank() || timeframe.isBlank()) {
+            resultText.text = "Enter a symbol and timeframe before backtesting."
+            return
+        }
+        try {
+            val report = backtester.run(symbol, timeframe, candles)
+            resultText.text = buildString {
+                append("HISTORICAL BACKTEST — IMPORTED CSV\n")
+                append("Symbol / timeframe: " + symbol + " / " + timeframe + "\n")
+                append("Candles: " + candles.size + "\n")
+                append("Trades: " + report.trades.size + "\n")
+                append("Skipped signals: " + report.skippedSignals + "\n")
+                append("Win rate: " + report.winRatePercent + "%\n")
+                append("Expectancy: " + report.expectancyR + " R\n")
+                append("Profit factor: " + report.profitFactor + "\n")
+                append("Maximum drawdown: " + report.maxDrawdownR + " R\n")
+                append("\nExecution: next-bar open; stop-first if SL and TP both touch in one candle.")
+                append("\nHistorical results do not predict future profitability.")
+            }
+            resultText.setTextColor(Color.LTGRAY)
+        } catch (error: Exception) {
+            resultText.text = "BACKTEST FAILED\n" + (error.message ?: "Unknown error")
+            resultText.setTextColor(Color.rgb(255, 130, 130))
+        }
+    }
+
+    private fun formatUtc(timestamp: Long): String =
+        DateFormat.getDateTimeInstance().apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date(timestamp))
+
+    private fun formatPrice(symbol: String, value: Double): String {
+        val decimals = when {
+            symbol.endsWith("JPY") -> 3
+            symbol.startsWith("XAU") -> 2
+            else -> 5
+        }
+        return String.format(Locale.US, "%." + decimals + "f", value)
     }
 }

@@ -2,11 +2,16 @@ name: Android APK
 
 on:
   workflow_dispatch:
-  push:
+  pull_request:
     branches: [ main ]
+  push:
+    branches: [ main, feature/scanner-engine-v1 ]
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  test-and-build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -22,6 +27,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+
+      - name: Run JVM unit tests
+        run: gradle testDebugUnitTest
 
       - name: Build debug APK
         run: gradle assembleDebug
