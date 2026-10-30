@@ -59,8 +59,20 @@ class BiquoteMarketDataProvider(
         require(bid.isFinite() && ask.isFinite() && bid > 0.0 && ask >= bid) {
             "Provider returned invalid bid/ask prices."
         }
-        val tickTime = Instant.parse(tick.getString("time")).toEpochMilli()
+        // The API's `time` field is an MT5 display string and is not reliably
+        // parseable. Use its documented ISO-8601 `timestamp` field instead.
+        val timestampText = tick.optString("timestamp")
+        require(timestampText.isNotBlank()) { "Provider tick is missing its ISO timestamp." }
+        val tickTime = Instant.parse(timestampText).toEpochMilli()
         val fetchedAt = System.currentTimeMillis()
+        require(tick.optString("marketState").equals("open", ignoreCase = true)) {
+            "Provider market is closed; last-known prices are not actionable."
+        }
+        require(!tick.optBoolean("stale", true)) { "Provider marked the bid/ask tick stale." }
+        val reportedAgeSeconds = tick.optLong("quoteAgeSeconds", Long.MAX_VALUE)
+        require(reportedAgeSeconds >= 0 && reportedAgeSeconds * 1_000L <= maxTickAgeMillis) {
+            "Provider reports a stale bid/ask tick."
+        }
         require(tickTime <= fetchedAt + 5_000L) { "Provider tick timestamp is in the future." }
         require(fetchedAt - tickTime <= maxTickAgeMillis) { "Provider bid/ask tick is stale." }
 
