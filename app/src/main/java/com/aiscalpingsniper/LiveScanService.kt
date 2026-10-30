@@ -95,11 +95,11 @@ class LiveScanService : Service() {
                 .put("direction", opportunity.direction?.name ?: JSONObject.NULL)
                 .put("status", when {
                     news.status == NewsGateStatus.NEWS_RESTRICTED -> "NEWS_RESTRICTED"
-                    news.status == NewsGateStatus.UNKNOWN -> "NEWS_UNKNOWN"
                     opportunity.setup != null -> "CANDIDATE"
                     else -> "NO_TRADE"
                 })
                 .put("news", news.toJson())
+                .put("calendarFlag", if (news.status == NewsGateStatus.UNKNOWN) "CALENDAR_UNVERIFIED" else "VERIFIED")
                 .put("blockers", JSONArray(opportunity.blockers))
                 .put("reasons", JSONArray(opportunity.reasons))
             opportunity.setup?.let { setup ->

@@ -91,7 +91,9 @@ class BiquoteCalendarFeed(
                         add(CalendarEvent(currency, title, impact, time))
                 }
             }
-            CalendarSnapshot(nowMillis, events, rows.length() > 0, if (rows.length() > 0) "Calendar parsed." else "Calendar returned no recognized events.")
+            val recognized = events.isNotEmpty()
+            CalendarSnapshot(nowMillis, events, recognized,
+                if (recognized) "Calendar parsed." else "Calendar returned no recognizable event timestamps; verification unavailable.")
         } finally { connection.disconnect() }
     } catch (error: Exception) {
         CalendarSnapshot(nowMillis, emptyList(), false, error.message ?: "Calendar unavailable.")

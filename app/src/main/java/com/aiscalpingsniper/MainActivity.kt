@@ -241,7 +241,8 @@ class MainActivity : Activity() {
             }.getOrDefault(JSONArray())
             val top = (0 until opportunities.length()).mapNotNull { opportunities.optJSONObject(it) }
                 .take(5)
-            scanStatus.text = if (top.isEmpty()) {
+            val calendarUnverified = !prefs.getBoolean("calendar_valid", false)
+            scanStatus.text = (if (calendarUnverified) "CALENDAR_UNVERIFIED • " else "") + if (top.isEmpty()) {
                 prefs.getString("matrix_status", "NO TRADE - WAIT • 7-timeframe matrix pending") ?: "NO TRADE - WAIT"
             } else top.joinToString("\\n") { item ->
                 val rating = if (item.isNull("rating")) "—" else item.optDouble("rating").toString() + "/10"
@@ -445,7 +446,7 @@ class MainActivity : Activity() {
                 append("\nExpectancy: " + report.expectancyR + "R | Profit factor: " + report.profitFactor)
                 append("\nMax drawdown: " + report.maxDrawdownR + "R")
                 append("\nNext-bar open fills; stop-first on ambiguous candles.")
-                append("\nCosts currently assumed ZERO: spread, commission, swaps and slippage are excluded. Results are optimistic, not execution-realistic.")
+                append("\nExecution-cost preset: spread 1.2 pips baseline (dynamic bid/ask when supplied), slippage 0.5 pip per side, commission 0.7 pip round-turn equivalent. Edit BacktestConfig defaults to customize. Swaps are not modeled.")
                 append("\nHistorical results do not predict future performance.")
             }
             updateStatus("BACKTEST COMPLETE • HISTORICAL DATA ONLY", blue)
