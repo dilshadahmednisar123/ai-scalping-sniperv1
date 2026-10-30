@@ -10,14 +10,14 @@ A user-started Android foreground service now polls the public **biquote.io** OH
 - Timeframe: M5 closed candles.
 - Poll cycle: approximately every 60 seconds.
 - Signal delivery: Android notifications, deduplicated by symbol/timeframe/direction/signal-candle timestamp.
-- Feed checks: source identity, symbol/timeframe identity, strictly increasing timestamps, candle gaps, fetch age and latest closed-candle age.
+- Feed checks: source identity, symbol/timeframe identity, strictly increasing timestamps, candle gaps, fetch age, latest closed-candle age, and a fresh bid/ask tick.
 - Failed, stale, incomplete or malformed feeds are rejected; they do not produce a signal.
 
 The source documents public OHLC endpoints and a live tick stream. The OHLC endpoint describes a mixture of Yahoo Finance bootstrap data, tick aggregation and MT5 historical feeds. The provider does not publish a contractual uptime or latency SLA. Treat it as an experimental data source, not a broker quote or execution-grade feed.
 
 **Important:** this is not guaranteed 24/7 scanning. Android can stop foreground data-sync services under operating-system policies; Android 15 also applies time limits to data-sync foreground services. The user must start scanning while the app is visible and keep the foreground notification enabled. Reopen the app and restart scanning if Android stops it.
 
-The provider's OHLC response does not give this scanner a verified broker-specific spread limit. Every alert must be checked against the user's MT5 broker price, spread, symbol suffix and execution conditions before any manual trade.
+The adapter also requests a fresh provider bid/ask tick and records its spread, but there is no configured broker-specific spread cap and the provider's spread is not the user's MT5 broker spread. Every alert must be checked against the user's broker price, spread, symbol suffix and execution conditions before any manual trade.
 
 ## Historical scanner and backtesting
 
