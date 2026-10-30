@@ -26,7 +26,7 @@ class MainActivity : Activity() {
         }
 
         val status = TextView(this).apply {
-            text = "V1 • Scanner not connected yet\n\nThis is the initial app shell. Live signals will only be enabled after a reliable market-data feed and strategy validation are implemented."
+            text = "SCANNER ENGINE • V1.1\n\nCore signal rules added:\n• EMA trend filter\n• Confirmed support / resistance pivots\n• Closed-candle confirmation\n• ATR-based stop loss and 2R target\n\nMARKET DATA: NOT CONNECTED\nNo live prices or trade alerts are being generated yet. A verified data feed and feed-quality checks are required before live scanning."
             textSize = 16f
             setTextColor(Color.LTGRAY)
             gravity = Gravity.CENTER
