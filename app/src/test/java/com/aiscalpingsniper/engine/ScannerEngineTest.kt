@@ -28,15 +28,16 @@ class ScannerEngineTest {
 
     @Test
     fun confirmedSetupIncludesExplicitSmcEvidenceAndRuleScore() {
-        val candles = (0 until 60).map { i ->
+        val candles = (0 until 61).map { i ->
             val base = 100.0 + i * 0.08
             when (i) {
                 55 -> Candle(i.toLong(), base + 0.1, base + 0.2, 100.0, base + 0.15)
                 56 -> Candle(i.toLong(), base + 0.15, base + 0.35, base + 0.10, base + 0.30)
                 57 -> Candle(i.toLong(), base + 0.30, base + 0.50, base + 0.25, base + 0.45)
                 58 -> Candle(i.toLong(), base + 0.45, base + 0.60, base + 0.40, base + 0.50)
+                59 -> Candle(i.toLong(), base + 0.50, base + 0.70, base + 0.40, base + 0.60)
                 // Wick below the confirmed 100.0 swing low, then close back above it.
-                59 -> Candle(i.toLong(), base + 0.50, base + 1.20, 99.99, base + 1.10)
+                60 -> Candle(i.toLong(), base + 0.50, base + 1.20, 99.99, base + 1.10)
                 else -> Candle(i.toLong(), base, base + 0.18, base - 0.18, base + 0.08)
             }
         }
