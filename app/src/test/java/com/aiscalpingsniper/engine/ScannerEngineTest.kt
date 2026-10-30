@@ -30,4 +30,19 @@ class ScannerEngineTest {
     fun rejectsInvalidOhlcRange() {
         Candle(1L, 100.0, 99.0, 98.0, 100.5)
     }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsNonFinitePrices() {
+        Candle(1L, 100.0, Double.NaN, 98.0, 99.0)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsNegativeVolume() {
+        Candle(1L, 100.0, 101.0, 99.0, 100.5, -1.0)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsInfiniteRewardRisk() {
+        ScannerConfig(rewardRisk = Double.POSITIVE_INFINITY)
+    }
 }
