@@ -1,6 +1,6 @@
 package com.aiscalpingsniper
 
-import android.app.Activity
+import android.app.Activity\nimport android.os.Build\nimport android.content.pm.PackageManager
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -30,7 +30,7 @@ class MainActivity : Activity() {
     private val backtester = BacktestEngine()
     private var importedCandles: List<Candle> = emptyList()
     private val openCsvRequest = 4101
-    private val maxCsvBytes = 20 * 1024 * 1024
+    private val maxCsvBytes = 20 * 1024 * 1024\n    private val notificationRequest = 4102
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,7 +49,7 @@ class MainActivity : Activity() {
             text = "IMPORT OHLC CSV"
             setOnClickListener { chooseCsv() }
         }
-        val backtestButton = Button(this).apply {
+        val startLiveButton = Button(this).apply {\n            text = "START LIVE SCANNER (M5)"\n            setOnClickListener { requestNotificationAndStart() }\n        }\n        val stopLiveButton = Button(this).apply {\n            text = "STOP LIVE SCANNER"\n            setOnClickListener { stopService(Intent(this@MainActivity, LiveScanService::class.java).setAction(LiveScanService.ACTION_STOP)) }\n        }\n        val backtestButton = Button(this).apply {
             text = "BACKTEST IMPORTED HISTORY"
             setOnClickListener { runBacktest() }
         }
@@ -85,7 +85,7 @@ class MainActivity : Activity() {
         setPadding(14, 10, 14, 10)
     }
 
-    private fun chooseCsv() {
+    private fun requestNotificationAndStart() {\n        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {\n            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), notificationRequest)\n            return\n        }\n        startLiveScanner()\n    }\n\n    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {\n        super.onRequestPermissionsResult(requestCode, permissions, grantResults)\n        if (requestCode == notificationRequest) {\n            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) startLiveScanner()\n            else resultText.text = "Notifications are required for live signal alerts. Enable notifications for this app in Android settings, then start the scanner again."\n        }\n    }\n\n    private fun startLiveScanner() {\n        val intent = Intent(this, LiveScanService::class.java).setAction(LiveScanService.ACTION_START)\n        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)\n        resultText.text = "LIVE SCANNER STARTED\\nSource: biquote.io experimental public feed\\nWatchlist: EURUSD, GBPUSD, USDJPY, XAUUSD\\nTimeframe: M5\\nPoll interval: 60 seconds\\nKeep the persistent notification visible. Android may stop long-running services. Verify every signal against your broker and spread."\n        resultText.setTextColor(Color.rgb(126, 190, 255))\n    }\n\n    private fun chooseCsv() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "text/*"
