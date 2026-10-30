@@ -129,9 +129,9 @@ class SevenTimeframeCollector(
         require(candleLimit in 60..1000)
     }
 
-    fun collect(symbols: List<String> = MarketUniverse.forexPairs): List<FrameResult> {
+    fun collect(symbols: List<String> = MarketUniverse.forexPairs, timeframes: List<String> = MarketUniverse.timeframes): List<FrameResult> {
         val tasks = symbols.flatMap { symbol ->
-            MarketUniverse.timeframes.map { frame -> Callable {
+            timeframes.map { frame -> Callable {
                 try {
                     synchronized(throttleLock) {
                         val wait = minimumRequestGapMillis - (System.currentTimeMillis() - lastRequestAt)

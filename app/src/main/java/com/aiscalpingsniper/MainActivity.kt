@@ -44,6 +44,7 @@ class MainActivity : Activity() {
     private lateinit var historyText: TextView
     private lateinit var scanStatus: TextView
     private lateinit var feedStatus: TextView
+    private lateinit var headlineStatus: TextView
     private lateinit var watchlistPanel: LinearLayout
     private val uiHandler = Handler(Looper.getMainLooper())
     private val quoteRefresh = object : Runnable {
@@ -111,8 +112,8 @@ class MainActivity : Activity() {
             pill("EXPERIMENTAL FEED", Color.rgb(255, 183, 77))
         ))
         hero.addView(space(13))
-        val headline = label("Market data not verified", 21, white, true)
-        hero.addView(headline)
+        headlineStatus = label("Scanner initializing", 21, white, true)
+        hero.addView(headlineStatus)
         feedStatus = label("No trusted live quote is currently confirmed. Prices and signals are hidden until feed checks pass.", 12, muted)
         hero.addView(space(6))
         hero.addView(feedStatus)
@@ -242,19 +243,27 @@ class MainActivity : Activity() {
             val top = (0 until opportunities.length()).mapNotNull { opportunities.optJSONObject(it) }
                 .take(5)
             val calendarUnverified = !prefs.getBoolean("calendar_valid", false)
-            scanStatus.text = (if (calendarUnverified) "CALENDAR_UNVERIFIED • " else "") + if (top.isEmpty()) {
-                prefs.getString("matrix_status", "NO TRADE - WAIT • 7-timeframe matrix pending") ?: "NO TRADE - WAIT"
+            val matrixState = prefs.getString("matrix_status", "PARTIAL • CORE FRAMES LOADING") ?: "PARTIAL • CORE FRAMES LOADING"
+            val opportunityText = if (top.isEmpty()) {
+                "No qualified setup yet • scanner continues evaluating core frames"
             } else top.joinToString("\\n") { item ->
                 val rating = if (item.isNull("rating")) "—" else item.optDouble("rating").toString() + "/10"
                 item.optString("symbol") + " • " + rating + " • " + item.optString("direction", "—") +
                     " • " + item.optString("status", "UNAVAILABLE")
-            } + "\\n" + (prefs.getString("matrix_status", "Matrix updating") ?: "Matrix updating")
+            }
+            scanStatus.text = (if (calendarUnverified) "CALENDAR_UNVERIFIED (INFO ONLY)\\n" else "") +
+                opportunityText + "\\n" + matrixState
         }
         val updated = prefs.getLong("universe_quotes_updated_at", 0L)
         if (updated > 0L) {
+            val liveCount = prefs.getInt("universe_live_count", 0)
+            val verified = prefs.getBoolean("market_data_verified", false)
+            headlineStatus.text = if (verified) "VERIFIED • SCANNING ACTIVE" else "SCANNING ACTIVE • PARTIAL FEED"
+            headlineStatus.setTextColor(if (verified) green else Color.rgb(255, 183, 77))
             feedStatus.text = "Quote snapshot updated " + DateFormat.getTimeInstance(DateFormat.MEDIUM)
-                .format(Date(updated)) + " • " + prefs.getInt("universe_live_count", 0) +
-                "/" + MarketUniverse.forexPairs.size + " live quotes. Closed/stale prices are not actionable."
+                .format(Date(updated)) + " • " + liveCount + "/" + MarketUniverse.forexPairs.size +
+                " live quotes • " + (if (verified) "VERIFIED • SCANNING ACTIVE" else "SCANNING ACTIVE • PARTIAL FEED") +
+                ". Only fresh live quotes are actionable."
         }
     }
 
