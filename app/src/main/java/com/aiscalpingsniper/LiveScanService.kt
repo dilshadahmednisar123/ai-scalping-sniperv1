@@ -115,7 +115,7 @@ class LiveScanService : Service() {
             } catch (_: Exception) {
                 return false
             }
-            val health = quality.validate(batch, maxOf(now, batch.fetchedAtMillis), interval)
+            val health = quality.validate(batch, now, interval)
             if (health.health != FeedHealth.HEALTHY) return false
             val bias = emaBias(batch.candles, 50) ?: return false
             if (bias != direction) return false
