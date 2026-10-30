@@ -70,7 +70,10 @@ class BiquoteMarketDataProvider(
             timeframe = timeframe.uppercase(Locale.ROOT),
             fetchedAtMillis = fetchedAt,
             candles = candles,
-            spread = abs(ask - bid)
+            spread = abs(ask - bid),
+            bid = bid,
+            ask = ask,
+            tickTimestampMillis = tickTime
         )
     }
 
