@@ -17,6 +17,7 @@ import com.aiscalpingsniper.engine.FeedHealth
 import com.aiscalpingsniper.engine.SetupStatus
 import com.aiscalpingsniper.engine.WatchlistInstrument
 import com.aiscalpingsniper.engine.WatchlistScanner
+import kotlin.math.abs
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -55,6 +56,11 @@ class LiveScanService : Service() {
             val setup = item.scanResult?.setup
             if (item.feedCheck.health != FeedHealth.HEALTHY ||
                 item.scanResult?.status != SetupStatus.CONFIRMED || setup == null) return@forEach
+            val bid = item.currentBid ?: return@forEach
+            val ask = item.currentAsk ?: return@forEach
+            val liveMid = (bid + ask) / 2.0
+            val maxEntryDrift = abs(setup.entry - setup.stopLoss) * 0.25
+            if (abs(liveMid - setup.entry) > maxEntryDrift) return@forEach
             if (!higherTimeframesAgree(setup.direction, setup.symbol)) return@forEach
             val key = setup.symbol + "|" + setup.timeframe + "|" + setup.direction + "|" + setup.signalCandleTime
             val prefs = getSharedPreferences("live_scan", MODE_PRIVATE)
@@ -69,7 +75,7 @@ class LiveScanService : Service() {
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(
-                    body + "\nM15 and H1 EMA50 alignment passed. Experimental third-party feed; verify your broker spread and price."
+                    body + "\nLive mid: " + price(setup.symbol, liveMid) + "\nM15/H1 EMA50 aligned; live price remains within 0.25R of signal entry. Verify your broker spread and price."
                 ))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
