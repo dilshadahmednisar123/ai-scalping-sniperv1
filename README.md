@@ -11,7 +11,7 @@ The Android app now contains a deterministic Kotlin signal engine with:
 - ATR-based volatility and stop-distance calculation.
 - Closed-candle breakout/rejection confirmation.
 - Configurable minimum score and risk/reward target (default 2R).
-- Strict OHLC CSV import parser for timestamp/OHLCV or date+time/OHLCV exports (comma, semicolon or tab separated), with UTC timestamp handling and duplicate/out-of-order rejection.\n- Input validation for candle ordering and OHLC ranges.
+- Strict OHLC CSV import parser for timestamp/OHLCV or date+time/OHLCV exports (comma, semicolon or tab separated), with UTC timestamp handling and duplicate/out-of-order rejection.\n- Android document-picker flow to import a CSV, select symbol/timeframe labels, and run a historical scan.\n- Explicit closed-candle scanner contract with an optional separately supplied forming candle; no implicit last-row dropping.\n- Market-feed validation tests for freshness, ordering, candle gaps, spread and missing identity.\n- Input validation for candle ordering and OHLC ranges.
 - JVM unit tests for insufficient history, invalid ordering and invalid OHLC.
 
 ## Important data-integrity rules
