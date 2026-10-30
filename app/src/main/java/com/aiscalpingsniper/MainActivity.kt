@@ -21,6 +21,10 @@ import com.aiscalpingsniper.engine.Candle
 import com.aiscalpingsniper.engine.CandleCsvParser
 import com.aiscalpingsniper.engine.ScannerEngine
 import com.aiscalpingsniper.engine.SetupStatus
+import com.aiscalpingsniper.engine.LiveQuote
+import com.aiscalpingsniper.engine.QuoteState
+import com.aiscalpingsniper.engine.MarketUniverse
+import org.json.JSONArray
 import java.io.ByteArrayOutputStream
 import java.text.DateFormat
 import java.util.Date
@@ -38,6 +42,7 @@ class MainActivity : Activity() {
     private lateinit var historyText: TextView
     private lateinit var scanStatus: TextView
     private lateinit var feedStatus: TextView
+    private lateinit var watchlistPanel: LinearLayout
     private val scanner = ScannerEngine()
     private val backtester = BacktestEngine()
     private var importedCandles: List<Candle> = emptyList()
@@ -125,26 +130,9 @@ class MainActivity : Activity() {
         page.addView(metrics)
 
         page.addView(sectionHeader("WATCHLIST", "M5 • AUTO SCAN"))
-        val watch = card()
-        listOf(
-            "EUR/USD" to "Waiting for validated quote",
-            "GBP/USD" to "Waiting for validated quote",
-            "USD/JPY" to "Waiting for validated quote",
-            "XAU/USD" to "Waiting for validated quote"
-        ).forEachIndexed { index, item ->
-            val line = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, dp(9), 0, dp(9))
-            }
-            val symbol = label(item.first, 14, white, true)
-            line.addView(symbol, LinearLayout.LayoutParams(dp(88), -2))
-            line.addView(label(item.second, 11, muted), LinearLayout.LayoutParams(0, -2, 1f))
-            line.addView(pill("NO DATA", muted))
-            watch.addView(line)
-            if (index != 3) watch.addView(separator())
-        }
-        page.addView(watch)
+        watchlistPanel = card()
+        page.addView(watchlistPanel)
+        renderWatchlist()
 
         page.addView(sectionHeader("SIGNAL INTELLIGENCE", "CLOSED-CANDLE ENGINE"))
         val signal = card()
@@ -177,6 +165,64 @@ class MainActivity : Activity() {
         page.addView(space(8))
         page.addView(label("Research software only. No broker execution. Verify every quote, spread and trade plan in MT5. A rule score is not a win probability.", 10, muted))
         setContentView(scroll)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::watchlistPanel.isInitialized) renderWatchlist()
+    }
+
+    private fun renderWatchlist() {
+        if (!::watchlistPanel.isInitialized) return
+        watchlistPanel.removeAllViews()
+        val prefs = getSharedPreferences("live_scan", MODE_PRIVATE)
+        val raw = prefs.getString("universe_quotes_json", null)
+        val bySymbol = linkedMapOf<String, LiveQuote>()
+        if (!raw.isNullOrBlank()) runCatching {
+            val array = JSONArray(raw)
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val quote = LiveQuote.fromJson(item)
+                val age = System.currentTimeMillis() - (quote.timestampMillis ?: 0L)
+                val safe = if (quote.state == QuoteState.LIVE && (age < 0 || age > 90_000L))
+                    quote.copy(state = QuoteState.STALE, detail = "Cached quote exceeded freshness limit.")
+                else quote
+                bySymbol[safe.symbol] = safe
+            }
+        }
+        MarketUniverse.forexPairs.forEachIndexed { index, symbol ->
+            val quote = bySymbol[symbol]
+            val line = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(8), 0, dp(8))
+            }
+            val pair = if (symbol == "XAUUSD") "XAU/USD" else symbol.substring(0, 3) + "/" + symbol.substring(3)
+            line.addView(label(pair, 13, white, true), LinearLayout.LayoutParams(dp(88), -2))
+            val quoteText = when (quote?.state) {
+                QuoteState.LIVE -> "Bid " + formatPrice(symbol, quote.bid!!) + "  Ask " + formatPrice(symbol, quote.ask!!)
+                QuoteState.CLOSED -> "Market closed • last " + (quote.mid?.let { formatPrice(symbol, it) } ?: "—")
+                QuoteState.STALE -> "Stale • " + (quote.mid?.let { formatPrice(symbol, it) } ?: "quote")
+                QuoteState.INVALID -> "Invalid provider response"
+                QuoteState.UNAVAILABLE, null -> "Waiting for quote"
+            }
+            line.addView(label(quoteText, 10, muted), LinearLayout.LayoutParams(0, -2, 1f))
+            val state = quote?.state?.name ?: "NO DATA"
+            val stateColor = when (quote?.state) {
+                QuoteState.LIVE -> green
+                QuoteState.CLOSED, QuoteState.STALE -> Color.rgb(255, 183, 77)
+                else -> muted
+            }
+            line.addView(pill(state, stateColor))
+            watchlistPanel.addView(line)
+            if (index != MarketUniverse.forexPairs.lastIndex) watchlistPanel.addView(separator())
+        }
+        val updated = prefs.getLong("universe_quotes_updated_at", 0L)
+        if (updated > 0L) {
+            feedStatus.text = "Quote snapshot updated " + DateFormat.getTimeInstance(DateFormat.MEDIUM)
+                .format(Date(updated)) + " • " + prefs.getInt("universe_live_count", 0) +
+                "/" + MarketUniverse.forexPairs.size + " live quotes. Closed/stale prices are not actionable."
+        }
     }
 
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
