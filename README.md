@@ -11,7 +11,7 @@ The Android app now contains a deterministic Kotlin signal engine with:
 - ATR-based volatility and stop-distance calculation.
 - Closed-candle breakout/rejection confirmation.
 - Configurable minimum score and risk/reward target (default 2R).
-- Input validation for candle ordering and OHLC ranges.
+- Strict OHLC CSV import parser for timestamp/OHLCV or date+time/OHLCV exports (comma, semicolon or tab separated), with UTC timestamp handling and duplicate/out-of-order rejection.\n- Input validation for candle ordering and OHLC ranges.
 - JVM unit tests for insufficient history, invalid ordering and invalid OHLC.
 
 ## Important data-integrity rules
@@ -35,7 +35,7 @@ GitHub Actions builds a debug APK and uploads it as an artifact when the workflo
 
 ## Next milestones
 
-1. Implement and verify free-data feed adapters, with stale-data and missing-candle handling.
+1. Connect the CSV importer to Android file selection and validate sample exports from each intended data source.\n2. Implement and verify free-data feed adapters, with stale-data and missing-candle handling.
 2. Add multi-symbol/timeframe scanning and a visible signal list.
 3. Add reproducible 90-day historical backtesting with spread/slippage assumptions and out-of-sample reporting.
 4. Add notifications only after feed and signal tests pass.
