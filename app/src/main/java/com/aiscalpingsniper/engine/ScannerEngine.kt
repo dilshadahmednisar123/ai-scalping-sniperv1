@@ -112,6 +112,11 @@ class ScannerEngine(private val config: ScannerConfig = ScannerConfig()) {
         val bullishRejection = last.close > last.open && last.close > prior.high
         val bearishRejection = last.close < last.open && last.close < prior.low
 
+        // SMC context is computed from closed candles only. It is additive evidence,
+        // not a mandatory gate, so a valid S/R setup is not silently over-filtered.
+        val smc = SmartMoneyStructureEngine(
+            SmartMoneyConfig(pivotLeft = config.pivotLeft, pivotRight = config.pivotRight)
+        ).analyze(bars)
         val longCandidate = bullishTrend && nearSupport && bullishRejection
         val shortCandidate = bearishTrend && nearResistance && bearishRejection
         if (!longCandidate && !shortCandidate) {
@@ -145,12 +150,22 @@ class ScannerEngine(private val config: ScannerConfig = ScannerConfig()) {
         val trendDistance = abs(last.close - ema) / atr
         val trendScore = (15.0 * (trendDistance / 1.5)).coerceIn(0.0, 15.0).toInt()
         val candleScore = (20.0 * bodyRatio).coerceIn(0.0, 20.0).toInt()
-        val score = (45 + proximityScore + trendScore + candleScore).coerceIn(0, 100)
+        val smcSweep = if (direction == Direction.LONG) smc.bullishLiquiditySweep else smc.bearishLiquiditySweep
+        val smcBos = if (direction == Direction.LONG) smc.bullishBreakOfStructure else smc.bearishBreakOfStructure
+        val smcFvg = if (direction == Direction.LONG) smc.bullishFairValueGap else smc.bearishFairValueGap
+        val smcOb = if (direction == Direction.LONG) smc.bullishOrderBlock else smc.bearishOrderBlock
+        val smcBonus = (if (smcSweep) 5 else 0) + (if (smcBos) 3 else 0) +
+            (if (smcFvg != null) 1 else 0) + (if (smcOb != null) 1 else 0)
+        val score = (45 + proximityScore + trendScore + candleScore + smcBonus).coerceIn(0, 100)
         val reasons = listOf(
             if (direction == Direction.LONG) "Price is above EMA trend filter" else "Price is below EMA trend filter",
             if (direction == Direction.LONG) "Retest of confirmed support" else "Retest of confirmed resistance",
             if (direction == Direction.LONG) "Bullish close above prior high" else "Bearish close below prior low",
-            "Signal uses closed candles only"
+            "Signal uses closed candles only",
+            if (smcSweep) "SMC: aligned liquidity sweep confirmed" else "SMC: no aligned sweep on signal candle",
+            if (smcBos) "SMC: aligned break of structure" else "SMC: no aligned BOS on signal candle",
+            if (smcFvg != null) "SMC: unmitigated aligned fair value gap in lookback" else "SMC: no active aligned FVG",
+            if (smcOb != null) "SMC: mechanical aligned order-block proxy found" else "SMC: no aligned order-block proxy"
         )
         val setup = TradeSetup(
             symbol = symbol,

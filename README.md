@@ -1,67 +1,33 @@
-# AI Scalping Sniper V1
+# AI Scalping Sniper
 
-Android-first Forex and Gold research scanner.
+Android Forex and Gold research scanner. The project is being rebuilt as a professional market-monitoring terminal.
 
-## Live scanner milestone (experimental)
+## Current build: dashboard rebuild
+- Replaced the initial plain form screen with a dark trading-terminal layout.
+- Added market overview, watchlist, feed-health messaging, signal-intelligence area, scan controls and a dedicated historical research section.
+- The UI intentionally displays unavailable values as dashes / waiting states. It does not invent prices, signal counts or performance.
+- Existing scanner, CSV import and backtest engines remain available.
 
-A user-started Android foreground service now polls the public **biquote.io** OHLC endpoint without an API key.
+## Live market data status — experimental, not broker-grade
+The current background scanner still uses the public no-key biquote.io adapter. It polls four symbols (EURUSD, GBPUSD, USDJPY, XAUUSD) on M5 approximately every 60 seconds and checks closed M15/H1 EMA50 alignment before alerts.
 
-- Watchlist: EURUSD, GBPUSD, USDJPY and XAUUSD.
-- Timeframe: M5 closed candles.
-- Poll cycle: approximately every 60 seconds.
-- Alert confluence: M5 setup plus closed M15 and H1 EMA50 directional alignment.
-- Signal delivery: Android notifications, deduplicated by symbol/timeframe/direction/signal-candle timestamp.
-- Feed checks: source identity, symbol/timeframe identity, strictly increasing timestamps, candle gaps, fetch age, latest closed-candle age, and a fresh bid/ask tick.
-- Failed, stale, incomplete or malformed feeds are rejected; they do not produce a signal.
+This source has no contractual uptime or latency SLA and is not verified as a broker-equivalent real-time feed. Symbol coverage, licensing/terms, freshness and data continuity must be independently validated. Do not treat this as execution-grade data or as proof of signal accuracy.
 
-The source documents public OHLC endpoints and a live tick stream. The OHLC endpoint describes a mixture of Yahoo Finance bootstrap data, tick aggregation and MT5 historical feeds. The provider does not publish a contractual uptime or latency SLA. Treat it as an experimental data source, not a broker quote or execution-grade feed.
+## Signal methodology and limitations
+The baseline scanner uses EMA trend, confirmed swing support/resistance, ATR-based stop placement and closed-candle confirmation. The experimental SMC context engine detects confirmed pivots, close-based BOS, wick-and-close liquidity sweeps, three-candle FVGs and a mechanical order-block proxy. SMC context is not yet fully integrated into the live decision score.
 
-**Important:** this is not guaranteed 24/7 scanning. Android can stop foreground data-sync services under operating-system policies; Android 15 also applies time limits to data-sync foreground services. The user must start scanning while the app is visible and keep the foreground notification enabled. Reopen the app and restart scanning if Android stops it.
+A rule score is not a probability of winning. No accuracy percentage is promised. Signals must be evaluated through reproducible out-of-sample and forward testing.
 
-The adapter also requests a fresh provider bid/ask tick and records its spread, but there is no configured broker-specific spread cap and the provider's spread is not the user's MT5 broker spread. Every alert must be checked against the user's broker price, spread, symbol suffix and execution conditions before any manual trade.
+## Historical research
+CSV import supports timestamped OHLC(V) data. Backtests use next-bar-open entries, conservative stop-first handling when both stop and target are touched in one candle, time exits, win rate, expectancy, profit factor and max drawdown. The current backtest does not yet fully model broker-specific variable spread, commissions, swaps or slippage.
 
-## Historical scanner and backtesting
+## Required engineering milestones before real-money reliance
+1. Validate a free data provider's API, symbol coverage, timestamps, market-session behavior, licensing and sustained freshness; reject the provider if it cannot meet explicit thresholds.
+2. Add provider health telemetry, reconnect/backoff, rate-limit handling and user-visible per-symbol feed status.
+3. Integrate MTF structure and SMC confluence without look-ahead or repainting.
+4. Add broker-specific spread/commission/slippage assumptions and walk-forward/out-of-sample validation.
+5. Add charting, signal history, configurable watchlists/timeframes, alert preferences and robust Android scheduling.
+6. Run paper/forward tests and publish measured metrics with sample size and confidence intervals before claiming signal quality.
 
-- Deterministic EMA trend, confirmed swing support/resistance, ATR stop distance and closed-candle confirmation.
-- CSV import from Android's document picker.
-- Strict OHLCV CSV parser supporting comma, semicolon or tab delimiters, timestamp or date/time columns, epoch seconds/milliseconds and UTC timestamps.
-- Historical scan of imported candles.
-- Walk-forward backtest using next-bar-open entries, conservative stop-first handling when SL and TP touch in one candle, time exits, win rate, expectancy, profit factor and maximum drawdown.
-- Experimental SMC context engine: confirmed swing pivots, close-based BOS, wick-and-close liquidity sweeps, three-candle FVG zones and a mechanical order-block proxy.
-- Feed-quality validation primitives and JVM unit tests.
-
-## CSV format
-
-See [sample-data/ohlcv-template.csv](sample-data/ohlcv-template.csv).
-
-Required columns: `timestamp,open,high,low,close`. Optional: `volume`. Timestamps without an explicit timezone are interpreted as UTC. Candles must be strictly chronological, with no duplicates. Do not label local-time data as UTC; convert it before import.
-
-## Build and install
-
-GitHub Actions runs JVM tests and assembles a debug APK.
-
-1. Open the repository's **Actions** tab.
-2. Open the latest successful **Android APK** workflow run on `feature/scanner-engine-v1`.
-3. Download the `ai-scalping-sniper-debug` artifact.
-4. Extract the ZIP and install `app-debug.apk` on Android. Allow installation from that source if Android asks.
-
-This is a debug build, not a Play Store release.
-
-## Current limitations
-
-- No broker connection, account access, order placement or automated execution.
-- SMC context is experimental and is not yet integrated into the baseline signal decision.
-- Rule score is not a calibrated probability or a measured win rate.
-- No instrument-specific spread cap, commission, swap or variable-slippage model is active in the live scanner.
-- Public-feed symbol availability and freshness may vary; unavailable XAUUSD or Forex candles are shown as unhealthy rather than fabricated.
-- The service polls M5 data and is not a tick-scalping engine.
-
-## Next milestones
-
-1. Verify live symbol availability and response quality across market sessions.
-2. Add provider tick bid/ask checks and configurable per-instrument spread caps.
-3. Integrate MTF context and SMC confluence into signal scoring without look-ahead.
-4. Build a proper live watchlist/status screen and user-configurable symbols/timeframes.
-5. Add realistic spread/slippage and out-of-sample backtests before trusting strategy performance.
-
-Research and educational software only. Verify every quote and risk parameter independently.
+## Safety
+Research and educational software only. No broker login, order placement or automated execution. Android may stop long-running background work under OS power policies. Verify every quote, spread and risk parameter independently in MT5.

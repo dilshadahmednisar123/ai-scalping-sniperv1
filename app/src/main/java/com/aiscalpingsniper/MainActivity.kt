@@ -4,10 +4,15 @@ import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -18,76 +23,321 @@ import com.aiscalpingsniper.engine.Candle
 import com.aiscalpingsniper.engine.CandleCsvParser
 import com.aiscalpingsniper.engine.ScannerEngine
 import com.aiscalpingsniper.engine.SetupStatus
+import com.aiscalpingsniper.engine.LiveQuote
+import com.aiscalpingsniper.engine.QuoteState
+import com.aiscalpingsniper.engine.MarketUniverse
+import org.json.JSONArray
 import java.io.ByteArrayOutputStream
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
+/**
+ * Native dashboard UI. All market values remain explicitly unavailable until
+ * a validated provider response supplies them; the UI never paints demo prices.
+ */
 class MainActivity : Activity() {
     private lateinit var symbolInput: EditText
     private lateinit var timeframeInput: EditText
-    private lateinit var resultText: TextView
+    private lateinit var statusText: TextView
+    private lateinit var historyText: TextView
+    private lateinit var scanStatus: TextView
+    private lateinit var feedStatus: TextView
+    private lateinit var watchlistPanel: LinearLayout
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private val quoteRefresh = object : Runnable {
+        override fun run() {
+            if (::watchlistPanel.isInitialized) renderWatchlist()
+            uiHandler.postDelayed(this, 5_000L)
+        }
+    }
     private val scanner = ScannerEngine()
     private val backtester = BacktestEngine()
     private var importedCandles: List<Candle> = emptyList()
     private val openCsvRequest = 4101
     private val notificationRequest = 4102
     private val maxCsvBytes = 20 * 1024 * 1024
+    private val bg = Color.rgb(9, 14, 25)
+    private val panel = Color.rgb(17, 25, 41)
+    private val panel2 = Color.rgb(23, 33, 52)
+    private val muted = Color.rgb(143, 158, 181)
+    private val white = Color.rgb(239, 244, 252)
+    private val blue = Color.rgb(79, 164, 255)
+    private val green = Color.rgb(39, 207, 142)
+    private val red = Color.rgb(255, 103, 119)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply {
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
+        if (Build.VERSION.SDK_INT >= 23) window.decorView.systemUiVisibility = 0
+        buildDashboard()
+    }
+
+    private fun buildDashboard() {
+        // Retain default metadata for CSV analysis without exposing manual scan controls.
+        symbolInput = field("EURUSD")
+        timeframeInput = field("M5")
+        val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24, 28, 24, 24)
-            setBackgroundColor(Color.rgb(12, 18, 30))
+            setBackgroundColor(bg)
+            setPadding(dp(18), dp(12), dp(18), dp(26))
         }
-        val scroll = ScrollView(this).apply { addView(root) }
-        root.addView(text("AI SCALPING SNIPER", 25f, Color.WHITE))
-        root.addView(text("LIVE SCANNER • V1.2 • EXPERIMENTAL DATA", 13f, Color.rgb(126, 190, 255)))
-        symbolInput = field("Symbol (e.g. EURUSD)", "EURUSD")
-        timeframeInput = field("Timeframe (e.g. M5)", "M5")
-        root.addView(symbolInput)
-        root.addView(timeframeInput)
-        root.addView(Button(this).apply {
-            text = "START LIVE SCANNER (M5)"
-            setOnClickListener { requestNotificationAndStart() }
-        })
-        root.addView(Button(this).apply {
-            text = "STOP LIVE SCANNER"
-            setOnClickListener { stopService(Intent(this@MainActivity, LiveScanService::class.java)) }
-        })
-        root.addView(Button(this).apply {
-            text = "IMPORT OHLC CSV"
-            setOnClickListener { chooseCsv() }
-        })
-        root.addView(Button(this).apply {
-            text = "BACKTEST IMPORTED HISTORY"
-            setOnClickListener { runBacktest() }
-        })
-        resultText = text(
-            "LIVE DATA: STOPPED\n\nStart the experimental M5 scanner for EURUSD, GBPUSD, USDJPY and XAUUSD. Or import a historical OHLC CSV. Live data is third-party and must be checked against your broker.",
-            15f, Color.LTGRAY
-        )
-        root.addView(resultText)
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            setBackgroundColor(bg)
+            addView(page)
+        }
+
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val brand = column().apply {
+            addView(label("AI SCALPING", 11, blue, true))
+            addView(label("SNIPER", 25, white, true))
+            addView(label("MARKET INTELLIGENCE TERMINAL", 9, muted, true))
+        }
+        top.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
+        top.addView(pill("V1.3 • REBUILD", blue))
+        page.addView(top)
+        page.addView(space(18))
+
+        val hero = card()
+        hero.addView(rowOf(
+            label("SCANNER STATUS", 11, muted, true),
+            pill("EXPERIMENTAL FEED", Color.rgb(255, 183, 77))
+        ))
+        hero.addView(space(13))
+        val headline = label("Market data not verified", 21, white, true)
+        hero.addView(headline)
+        feedStatus = label("No trusted live quote is currently confirmed. Prices and signals are hidden until feed checks pass.", 12, muted)
+        hero.addView(space(6))
+        hero.addView(feedStatus)
+        hero.addView(space(14))
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val start = actionButton("START SCANNER", green, true)
+        start.setOnClickListener { requestNotificationAndStart() }
+        val stop = actionButton("STOP", Color.rgb(56, 70, 91), false)
+        stop.setOnClickListener {
+            stopService(Intent(this@MainActivity, LiveScanService::class.java).setAction(LiveScanService.ACTION_STOP))
+            updateStatus("Scanner stop requested. Android may take a moment to remove its notification.", muted)
+        }
+        actions.addView(start, LinearLayout.LayoutParams(0, dp(46), 1f))
+        actions.addView(spaceWidth(8))
+        actions.addView(stop, LinearLayout.LayoutParams(dp(92), dp(46)))
+        hero.addView(actions)
+        page.addView(hero)
+
+        page.addView(sectionHeader("MARKET PULSE", "LIVE QUOTES ONLY"))
+        val metrics = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        metrics.addView(metricCard("LIVE MARKETS", "—", "Awaiting feed", blue), LinearLayout.LayoutParams(0, -1, 1f))
+        metrics.addView(spaceWidth(9))
+        metrics.addView(metricCard("VALID SETUPS", "—", "No verified scan", green), LinearLayout.LayoutParams(0, -1, 1f))
+        page.addView(metrics)
+
+        page.addView(sectionHeader("WATCHLIST", "M5 • AUTO SCAN"))
+        watchlistPanel = card()
+        page.addView(watchlistPanel)
+        renderWatchlist()
+
+        page.addView(sectionHeader("SIGNAL INTELLIGENCE", "CLOSED-CANDLE ENGINE"))
+        val signal = card()
+        scanStatus = label("NO ACTIVE SETUP", 15, white, true)
+        signal.addView(scanStatus)
+        signal.addView(space(8))
+        signal.addView(label("When a valid setup is detected, its direction, entry, stop loss, targets, risk/reward, evidence and invalidation conditions will appear here.", 12, muted))
+        signal.addView(space(12))
+        signal.addView(label("Evidence framework", 11, blue, true))
+        signal.addView(label("Liquidity sweep  •  BOS / MSS  •  FVG  •  S/R  •  EMA trend  •  ATR risk", 11, muted))
+        page.addView(signal)
+
+        page.addView(sectionHeader("RESEARCH & VALIDATION", "HISTORICAL DATA"))
+        val tools = card()
+        val import = actionButton("IMPORT OHLC CSV", blue, true)
+        import.setOnClickListener { chooseCsv() }
+        tools.addView(import)
+        tools.addView(space(8))
+        val backtest = actionButton("RUN HISTORICAL BACKTEST", Color.rgb(56, 70, 91), false)
+        backtest.setOnClickListener { runBacktest() }
+        tools.addView(backtest)
+        historyText = label("No historical dataset imported. Backtests require real, correctly timestamped OHLC candles.", 11, muted)
+        tools.addView(space(10))
+        tools.addView(historyText)
+        page.addView(tools)
+
+        page.addView(space(18))
+        statusText = label("SYSTEM READY • LIVE FEED NOT YET VERIFIED", 10, muted, true)
+        page.addView(statusText)
+        page.addView(space(8))
+        page.addView(label("Research software only. No broker execution. Verify every quote, spread and trade plan in MT5. A rule score is not a win probability.", 10, muted))
         setContentView(scroll)
     }
 
-    private fun text(value: String, size: Float, color: Int) = TextView(this).apply {
-        text = value
-        textSize = size
-        setTextColor(color)
-        gravity = Gravity.CENTER_HORIZONTAL
-        setPadding(0, 14, 0, 14)
+    override fun onResume() {
+        super.onResume()
+        if (::watchlistPanel.isInitialized) {
+            renderWatchlist()
+            uiHandler.removeCallbacks(quoteRefresh)
+            uiHandler.post(quoteRefresh)
+        }
     }
 
-    private fun field(hintText: String, initial: String) = EditText(this).apply {
-        hint = hintText
-        setText(initial)
+    override fun onPause() {
+        uiHandler.removeCallbacks(quoteRefresh)
+        super.onPause()
+    }
+
+    private fun renderWatchlist() {
+        if (!::watchlistPanel.isInitialized) return
+        watchlistPanel.removeAllViews()
+        val prefs = getSharedPreferences("live_scan", MODE_PRIVATE)
+        val raw = prefs.getString("universe_quotes_json", null)
+        val bySymbol = linkedMapOf<String, LiveQuote>()
+        if (!raw.isNullOrBlank()) runCatching {
+            val array = JSONArray(raw)
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val quote = LiveQuote.fromJson(item)
+                val age = System.currentTimeMillis() - (quote.timestampMillis ?: 0L)
+                val safe = if (quote.state == QuoteState.LIVE && (age < 0 || age > 90_000L))
+                    quote.copy(state = QuoteState.STALE, detail = "Cached quote exceeded freshness limit.")
+                else quote
+                bySymbol[safe.symbol] = safe
+            }
+        }
+        MarketUniverse.forexPairs.forEachIndexed { index, symbol ->
+            val quote = bySymbol[symbol]
+            val line = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(8), 0, dp(8))
+            }
+            val pair = if (symbol == "XAUUSD") "XAU/USD" else symbol.substring(0, 3) + "/" + symbol.substring(3)
+            line.addView(label(pair, 13, white, true), LinearLayout.LayoutParams(dp(88), -2))
+            val quoteText = when (quote?.state) {
+                QuoteState.LIVE -> "Bid " + formatPrice(symbol, quote.bid!!) + "  Ask " + formatPrice(symbol, quote.ask!!)
+                QuoteState.CLOSED -> "Market closed • last " + (quote.mid?.let { formatPrice(symbol, it) } ?: "—")
+                QuoteState.STALE -> "Stale • " + (quote.mid?.let { formatPrice(symbol, it) } ?: "quote")
+                QuoteState.INVALID -> "Invalid provider response"
+                QuoteState.UNAVAILABLE, null -> "Waiting for quote"
+            }
+            line.addView(label(quoteText, 10, muted), LinearLayout.LayoutParams(0, -2, 1f))
+            val state = quote?.state?.name ?: "NO DATA"
+            val stateColor = when (quote?.state) {
+                QuoteState.LIVE -> green
+                QuoteState.CLOSED, QuoteState.STALE -> Color.rgb(255, 183, 77)
+                else -> muted
+            }
+            line.addView(pill(state, stateColor))
+            watchlistPanel.addView(line)
+            if (index != MarketUniverse.forexPairs.lastIndex) watchlistPanel.addView(separator())
+        }
+        if (::scanStatus.isInitialized) {
+            val opportunities = runCatching {
+                JSONArray(prefs.getString("matrix_opportunities_json", "[]"))
+            }.getOrDefault(JSONArray())
+            val top = (0 until opportunities.length()).mapNotNull { opportunities.optJSONObject(it) }
+                .take(5)
+            val calendarUnverified = !prefs.getBoolean("calendar_valid", false)
+            scanStatus.text = (if (calendarUnverified) "CALENDAR_UNVERIFIED • " else "") + if (top.isEmpty()) {
+                prefs.getString("matrix_status", "NO TRADE - WAIT • 7-timeframe matrix pending") ?: "NO TRADE - WAIT"
+            } else top.joinToString("\\n") { item ->
+                val rating = if (item.isNull("rating")) "—" else item.optDouble("rating").toString() + "/10"
+                item.optString("symbol") + " • " + rating + " • " + item.optString("direction", "—") +
+                    " • " + item.optString("status", "UNAVAILABLE")
+            } + "\\n" + (prefs.getString("matrix_status", "Matrix updating") ?: "Matrix updating")
+        }
+        val updated = prefs.getLong("universe_quotes_updated_at", 0L)
+        if (updated > 0L) {
+            feedStatus.text = "Quote snapshot updated " + DateFormat.getTimeInstance(DateFormat.MEDIUM)
+                .format(Date(updated)) + " • " + prefs.getInt("universe_live_count", 0) +
+                "/" + MarketUniverse.forexPairs.size + " live quotes. Closed/stale prices are not actionable."
+        }
+    }
+
+    private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    private fun card() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(15), dp(14), dp(15), dp(14))
+        background = rounded(panel, 16)
+    }
+    private fun sectionHeader(title: String, trailing: String): View {
+        val line = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(19), 0, dp(9))
+        }
+        line.addView(label(title, 12, white, true), LinearLayout.LayoutParams(0, -2, 1f))
+        line.addView(label(trailing, 9, muted, true))
+        return line
+    }
+    private fun rowOf(a: View, b: View) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(a, LinearLayout.LayoutParams(0, -2, 1f))
+        addView(b)
+    }
+    private fun metricCard(title: String, value: String, detail: String, accent: Int): View {
+        val box = card()
+        box.addView(label(title, 9, muted, true))
+        box.addView(space(7))
+        box.addView(label(value, 25, accent, true))
+        box.addView(label(detail, 10, muted))
+        return box
+    }
+    private fun label(value: String, size: Int, color: Int, bold: Boolean = false) = TextView(this).apply {
+        text = value
+        textSize = size.toFloat()
+        setTextColor(color)
+        if (bold) typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        includeFontPadding = false
+    }
+    private fun pill(value: String, color: Int) = TextView(this).apply {
+        text = value
+        textSize = 9f
+        setTextColor(color)
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        setPadding(dp(9), dp(6), dp(9), dp(6))
+        background = rounded(Color.argb(28, Color.red(color), Color.green(color), Color.blue(color)), 30)
+    }
+    private fun actionButton(value: String, color: Int, primary: Boolean) = Button(this).apply {
+        text = value
+        textSize = 11f
+        isAllCaps = false
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(if (primary) bg else white)
+        background = rounded(color, 11)
+        stateListAnimator = null
+        minHeight = 0
+        minimumHeight = 0
+        setPadding(dp(10), 0, dp(10), 0)
+    }
+    private fun field(value: String) = EditText(this).apply {
+        setText(value)
+        setTextColor(white)
+        textSize = 14f
         setSingleLine(true)
-        setTextColor(Color.WHITE)
-        setHintTextColor(Color.GRAY)
-        setPadding(14, 10, 14, 10)
+        setPadding(dp(12), dp(8), dp(12), dp(8))
+        background = rounded(panel2, 9)
+    }
+    private fun separator() = View(this).apply {
+        setBackgroundColor(Color.rgb(37, 49, 68))
+        layoutParams = LinearLayout.LayoutParams(-1, dp(1))
+    }
+    private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
+    private fun spaceWidth(width: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(width), 1) }
+    private fun rounded(color: Int, radius: Int) = GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = dp(radius).toFloat()
+    }
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+    private fun updateStatus(message: String, color: Int) {
+        statusText.text = message.uppercase(Locale.ROOT)
+        statusText.setTextColor(color)
     }
 
     private fun requestNotificationAndStart() {
@@ -104,19 +354,16 @@ class MainActivity : Activity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == notificationRequest) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                startLiveScanner()
-            } else {
-                resultText.text = "Notifications are required for live signal alerts. Enable notifications for this app in Android settings, then start the scanner again."
-            }
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) startLiveScanner()
+            else updateStatus("Notifications denied. Enable them in Android settings to receive scanner alerts.", red)
         }
     }
 
     private fun startLiveScanner() {
         val intent = Intent(this, LiveScanService::class.java).setAction(LiveScanService.ACTION_START)
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
-        resultText.text = "LIVE SCANNER STARTED\nSource: biquote.io experimental public feed\nWatchlist: EURUSD, GBPUSD, USDJPY, XAUUSD\nTimeframe: M5\nPoll interval: 60 seconds\nKeep the persistent notification visible. Android may stop long-running services. Verify every signal against your broker and spread."
-        resultText.setTextColor(Color.rgb(126, 190, 255))
+        feedStatus.text = "Scanner requested. Feed health and market prices are not verified until provider responses pass validation."
+        updateStatus("SCANNER START REQUESTED • EXPERIMENTAL PUBLIC FEED", blue)
     }
 
     private fun chooseCsv() {
@@ -153,7 +400,7 @@ class MainActivity : Activity() {
     }
 
     private fun importAndScan(uri: Uri) {
-        resultText.text = "Reading CSV…"
+        historyText.text = "Reading historical file…"
         try {
             val candles = CandleCsvParser.parse(readCsvWithLimit(uri))
             importedCandles = candles
@@ -162,69 +409,55 @@ class MainActivity : Activity() {
             require(symbol.isNotBlank() && timeframe.isNotBlank()) { "Enter a symbol and timeframe." }
             val result = scanner.scan(symbol, timeframe, candles)
             val setup = result.setup
-            resultText.text = buildString {
-                append("DATA SOURCE: IMPORTED CSV (HISTORICAL)\n")
-                append("CANDLES LOADED: " + candles.size + "\n")
-                append("LAST CANDLE (UTC): " + formatUtc(candles.last().timestamp) + "\n")
-                append("SYMBOL / TF: " + symbol + " / " + timeframe + "\n\n")
-                append("SCAN STATUS: " + result.status + "\n" + result.message)
+            val summary = buildString {
+                append("CSV • " + candles.size + " candles • Last UTC: " + formatUtc(candles.last().timestamp))
+                append("\n" + symbol + " / " + timeframe + " • " + result.status)
+                append("\n" + result.message)
                 if (setup != null) {
-                    append("\n\n" + setup.direction + " CANDIDATE\n")
-                    append("Entry: " + formatPrice(symbol, setup.entry) + "\n")
-                    append("Stop loss: " + formatPrice(symbol, setup.stopLoss) + "\n")
-                    append("Take profit: " + formatPrice(symbol, setup.takeProfit) + "\n")
-                    append("Risk/reward: 1:" + setup.riskReward + "\n")
-                    append("Rule score: " + setup.score + "/100 (not win probability)\n")
-                    append("Signal candle UTC: " + formatUtc(setup.signalCandleTime) + "\n")
-                    append("\nReasons:\n• " + setup.reasons.joinToString("\n• "))
+                    append("\n" + setup.direction + " | Entry " + formatPrice(symbol, setup.entry))
+                    append("\nSL " + formatPrice(symbol, setup.stopLoss) + " | TP " + formatPrice(symbol, setup.takeProfit))
+                    append("\nRR 1:" + setup.riskReward + " | Rule score " + setup.score + "/100 (not probability)")
+                    append("\nEvidence: " + setup.reasons.joinToString(" • "))
                 }
-                append("\n\nHISTORICAL IMPORT ONLY — no live feed or automatic trade execution.")
             }
-            resultText.setTextColor(if (result.status == SetupStatus.CONFIRMED) Color.rgb(120, 230, 160) else Color.LTGRAY)
+            historyText.text = summary
+            scanStatus.text = if (result.status == SetupStatus.CONFIRMED) "HISTORICAL SETUP CANDIDATE" else "NO CONFIRMED HISTORICAL SETUP"
+            updateStatus("HISTORICAL CSV SCAN COMPLETE • NOT A LIVE SIGNAL", blue)
         } catch (error: Exception) {
-            resultText.text = "CSV IMPORT FAILED\n" + (error.message ?: "Unknown error")
-            resultText.setTextColor(Color.rgb(255, 130, 130))
+            historyText.text = "CSV IMPORT FAILED • " + (error.message ?: "Unknown error")
+            updateStatus("HISTORICAL IMPORT FAILED", red)
         }
     }
 
     private fun runBacktest() {
         val candles = importedCandles
         if (candles.isEmpty()) {
-            resultText.text = "Import a CSV file before running a backtest."
+            historyText.text = "Import a CSV file before running a backtest."
             return
         }
         val symbol = symbolInput.text.toString().trim().uppercase(Locale.ROOT)
         val timeframe = timeframeInput.text.toString().trim().uppercase(Locale.ROOT)
-        if (symbol.isBlank() || timeframe.isBlank()) {
-            resultText.text = "Enter a symbol and timeframe before backtesting."
-            return
-        }
         try {
             val report = backtester.run(symbol, timeframe, candles)
-            resultText.text = buildString {
-                append("HISTORICAL BACKTEST — IMPORTED CSV\n")
-                append("Symbol / timeframe: " + symbol + " / " + timeframe + "\n")
-                append("Candles: " + candles.size + "\n")
-                append("Trades: " + report.trades.size + "\n")
-                append("Skipped signals: " + report.skippedSignals + "\n")
-                append("Win rate: " + report.winRatePercent + "%\n")
-                append("Expectancy: " + report.expectancyR + " R\n")
-                append("Profit factor: " + report.profitFactor + "\n")
-                append("Maximum drawdown: " + report.maxDrawdownR + " R\n")
-                append("\nExecution: next-bar open; stop-first if SL and TP both touch in one candle.")
-                append("\nHistorical results do not predict future profitability.")
+            historyText.text = buildString {
+                append("BACKTEST • " + symbol + " / " + timeframe)
+                append("\nCandles: " + candles.size + " | Trades: " + report.trades.size)
+                append("\nSkipped: " + report.skippedSignals + " | Win rate: " + report.winRatePercent + "%")
+                append("\nExpectancy: " + report.expectancyR + "R | Profit factor: " + report.profitFactor)
+                append("\nMax drawdown: " + report.maxDrawdownR + "R")
+                append("\nNext-bar open fills; stop-first on ambiguous candles.")
+                append("\nExecution-cost preset: spread 1.2 pips baseline (dynamic bid/ask when supplied), slippage 0.5 pip per side, commission 0.7 pip round-turn equivalent. Edit BacktestConfig defaults to customize. Swaps are not modeled.")
+                append("\nHistorical results do not predict future performance.")
             }
-            resultText.setTextColor(Color.LTGRAY)
+            updateStatus("BACKTEST COMPLETE • HISTORICAL DATA ONLY", blue)
         } catch (error: Exception) {
-            resultText.text = "BACKTEST FAILED\n" + (error.message ?: "Unknown error")
-            resultText.setTextColor(Color.rgb(255, 130, 130))
+            historyText.text = "BACKTEST FAILED • " + (error.message ?: "Unknown error")
+            updateStatus("BACKTEST FAILED", red)
         }
     }
 
     private fun formatUtc(timestamp: Long): String =
-        DateFormat.getDateTimeInstance().apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date(timestamp))
+        DateFormat.getDateTimeInstance().apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(timestamp))
 
     private fun formatPrice(symbol: String, value: Double): String {
         val decimals = when {

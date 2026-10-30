@@ -59,8 +59,20 @@ class BiquoteMarketDataProvider(
         require(bid.isFinite() && ask.isFinite() && bid > 0.0 && ask >= bid) {
             "Provider returned invalid bid/ask prices."
         }
-        val tickTime = Instant.parse(tick.getString("time")).toEpochMilli()
+        // The API's `time` field is an MT5 display string and is not reliably
+        // parseable. Use its documented ISO-8601 `timestamp` field instead.
+        val timestampText = tick.optString("timestamp")
+        require(timestampText.isNotBlank()) { "Provider tick is missing its ISO timestamp." }
+        val tickTime = Instant.parse(timestampText).toEpochMilli()
         val fetchedAt = System.currentTimeMillis()
+        require(tick.optString("marketState").equals("open", ignoreCase = true)) {
+            "Provider market is closed; last-known prices are not actionable."
+        }
+        require(!tick.optBoolean("stale", true)) { "Provider marked the bid/ask tick stale." }
+        val reportedAgeSeconds = tick.optLong("quoteAgeSeconds", Long.MAX_VALUE)
+        require(reportedAgeSeconds in 0..(maxTickAgeMillis / 1_000L)) {
+            "Provider reports a stale bid/ask tick."
+        }
         require(tickTime <= fetchedAt + 5_000L) { "Provider tick timestamp is in the future." }
         require(fetchedAt - tickTime <= maxTickAgeMillis) { "Provider bid/ask tick is stale." }
 
@@ -75,6 +87,36 @@ class BiquoteMarketDataProvider(
             ask = ask,
             tickTimestampMillis = tickTime
         )
+    }
+
+    /** OHLC-only path for matrix scans; avoids one redundant quote request per timeframe. */
+    fun fetchCandles(symbol: String, timeframe: String, limit: Int = 200): List<Candle> {
+        require(symbol.matches(Regex("[A-Za-z0-9._-]{3,20}")))
+        require(limit in 60..1000)
+        val interval = when (timeframe.uppercase(Locale.ROOT)) {
+            "M1" -> "1m"; "M5" -> "5m"; "M15" -> "15m"; "M30" -> "30m"
+            "H1", "1H" -> "1h"; "H4", "4H" -> "4h"; "D1", "1D" -> "1d"
+            else -> throw IllegalArgumentException("Unsupported timeframe: $timeframe")
+        }
+        val json = requestJson("https://biquote.io/api/$symbol/ohlc?interval=$interval&limit=$limit")
+        require(json.optString("symbol").equals(symbol, true)) { "Provider symbol mismatch." }
+        require(json.optString("interval") == interval) { "Provider timeframe mismatch." }
+        val bars = json.optJSONArray("bars") ?: error("Provider response has no bars array.")
+        val candles = buildList {
+            for (i in 0 until bars.length()) {
+                val bar = bars.optJSONObject(i) ?: continue
+                if (bar.optBoolean("isOpen", false)) continue
+                val timestamp = Instant.parse(bar.getString("openTime")).toEpochMilli()
+                add(Candle(timestamp, bar.getDouble("open"), bar.getDouble("high"),
+                    bar.getDouble("low"), bar.getDouble("close"),
+                    bar.optDouble("tickVolume", bar.optDouble("volume", 0.0))))
+            }
+        }.sortedBy { it.timestamp }
+        require(candles.size >= 60) { "Only ${candles.size} closed candles returned; need at least 60." }
+        require(candles.zipWithNext().all { it.first.timestamp < it.second.timestamp }) {
+            "Provider returned duplicate or unordered candle timestamps."
+        }
+        return candles
     }
 
     private fun requestJson(address: String): JSONObject {

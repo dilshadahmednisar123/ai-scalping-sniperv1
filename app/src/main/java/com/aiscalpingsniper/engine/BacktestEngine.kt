@@ -5,12 +5,32 @@ import kotlin.math.max
 
 data class BacktestConfig(
     val maxBarsInTrade: Int = 48,
-    /** Estimated adverse price movement on each side of a round trip. */
-    val executionCostPerSide: Double = 0.0
+    /** Editable baseline presets in broker-independent pips. */
+    val baselineSpreadPips: Double = 1.2,
+    val slippagePipsPerSide: Double = 0.5,
+    val commissionPipsRoundTrip: Double = 0.7,
+    /** Optional measured full bid/ask spread in price units overrides baseline spread. */
+    val dynamicSpreadPrice: Double? = null
 ) {
     init {
         require(maxBarsInTrade >= 1)
-        require(executionCostPerSide.isFinite() && executionCostPerSide >= 0.0)
+        require(listOf(baselineSpreadPips, slippagePipsPerSide, commissionPipsRoundTrip)
+            .all { it.isFinite() && it >= 0.0 })
+        require(dynamicSpreadPrice == null || (dynamicSpreadPrice.isFinite() && dynamicSpreadPrice >= 0.0))
+    }
+
+    fun pipSize(symbol: String): Double = when {
+        symbol.startsWith("XAU") -> 0.1
+        symbol.endsWith("JPY") -> 0.01
+        else -> 0.0001
+    }
+
+    /** Total adverse price offset charged on each side of the simulated round trip. */
+    fun costPerSide(symbol: String, observedSpreadPrice: Double? = dynamicSpreadPrice): Double {
+        val pip = pipSize(symbol)
+        val spread = observedSpreadPrice ?: (baselineSpreadPips * pip)
+        return spread / 2.0 + slippagePipsPerSide * pip +
+            commissionPipsRoundTrip * pip / 2.0
     }
 }
 
@@ -45,7 +65,7 @@ class BacktestEngine(
     private val scanner: ScannerEngine = ScannerEngine(),
     private val config: BacktestConfig = BacktestConfig()
 ) {
-    fun run(symbol: String, timeframe: String, candles: List<Candle>): BacktestReport {
+    fun run(symbol: String, timeframe: String, candles: List<Candle>, observedSpreadPrice: Double? = null): BacktestReport {
         require(symbol.isNotBlank() && timeframe.isNotBlank())
         require(candles.zipWithNext().none { it.first.timestamp >= it.second.timestamp }) {
             "Candles must be strictly chronological."
@@ -71,11 +91,11 @@ class BacktestEngine(
             val entryBar = candles[entryIndex]
             // Signal is known at the previous close; fill only at the next bar open.
             val entryFill = if (setup.direction == Direction.LONG) {
-                entryBar.open + config.executionCostPerSide
+                entryBar.open + config.costPerSide(symbol, observedSpreadPrice)
             } else {
-                entryBar.open - config.executionCostPerSide
+                entryBar.open - config.costPerSide(symbol, observedSpreadPrice)
             }
-            val exit = resolveExit(setup, candles, entryIndex, config)
+            val exit = resolveExit(setup, candles, entryIndex, config, symbol, observedSpreadPrice)
             if (exit == null) {
                 skipped++
                 index++
@@ -147,8 +167,11 @@ class BacktestEngine(
         setup: TradeSetup,
         candles: List<Candle>,
         entryIndex: Int,
-        config: BacktestConfig
+        config: BacktestConfig,
+        symbol: String,
+        observedSpreadPrice: Double?
     ): Exit? {
+        val exitCost = config.costPerSide(symbol, observedSpreadPrice)
         val lastIndex = minOf(candles.lastIndex, entryIndex + config.maxBarsInTrade - 1)
         for (i in entryIndex..lastIndex) {
             val bar = candles[i]
@@ -170,9 +193,9 @@ class BacktestEngine(
                     maxOf(setup.stopLoss, bar.open)
                 }
                 val fill = if (setup.direction == Direction.LONG) {
-                    rawExit - config.executionCostPerSide
+                    rawExit - exitCost
                 } else {
-                    rawExit + config.executionCostPerSide
+                    rawExit + exitCost
                 }
                 return Exit(i, fill, ExitReason.STOP_LOSS)
             }
@@ -183,9 +206,9 @@ class BacktestEngine(
                     minOf(setup.takeProfit, bar.open)
                 }
                 val fill = if (setup.direction == Direction.LONG) {
-                    rawExit - config.executionCostPerSide
+                    rawExit - exitCost
                 } else {
-                    rawExit + config.executionCostPerSide
+                    rawExit + exitCost
                 }
                 return Exit(i, fill, ExitReason.TAKE_PROFIT)
             }
@@ -194,9 +217,9 @@ class BacktestEngine(
         val bar = candles[lastIndex]
         val rawExit = bar.close
         val fill = if (setup.direction == Direction.LONG) {
-            rawExit - config.executionCostPerSide
+            rawExit - exitCost
         } else {
-            rawExit + config.executionCostPerSide
+            rawExit + exitCost
         }
         return Exit(lastIndex, fill, ExitReason.TIME_EXIT)
     }
