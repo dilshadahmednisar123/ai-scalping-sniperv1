@@ -10,6 +10,9 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.aiscalpingsniper.engine.BiquoteMarketDataProvider
+import com.aiscalpingsniper.engine.Candle
+import com.aiscalpingsniper.engine.Direction
+import com.aiscalpingsniper.engine.MarketDataQuality
 import com.aiscalpingsniper.engine.FeedHealth
 import com.aiscalpingsniper.engine.SetupStatus
 import com.aiscalpingsniper.engine.WatchlistInstrument
@@ -52,6 +55,7 @@ class LiveScanService : Service() {
             val setup = item.scanResult?.setup
             if (item.feedCheck.health != FeedHealth.HEALTHY ||
                 item.scanResult?.status != SetupStatus.CONFIRMED || setup == null) return@forEach
+            if (!higherTimeframesAgree(setup.direction, setup.symbol)) return@forEach
             val key = setup.symbol + "|" + setup.timeframe + "|" + setup.direction + "|" + setup.signalCandleTime
             val prefs = getSharedPreferences("live_scan", MODE_PRIVATE)
             if (prefs.getString("last_signal_" + key, null) == "sent") return@forEach
@@ -65,7 +69,7 @@ class LiveScanService : Service() {
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(
-                    body + "\nExperimental third-party feed. Verify spread and broker price before trading."
+                    body + "\nM15 and H1 EMA50 alignment passed. Experimental third-party feed; verify your broker spread and price."
                 ))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
@@ -73,6 +77,40 @@ class LiveScanService : Service() {
             getSystemService(NotificationManager::class.java)
                 .notify((key.hashCode() and 0x7fffffff).coerceAtLeast(1), notification)
             prefs.edit().putString("last_signal_" + key, "sent").apply()
+        }
+    }
+
+
+    /** M5 entries are notified only when both closed M15 and H1 candles agree with direction. */
+    private fun higherTimeframesAgree(direction: Direction, symbol: String): Boolean {
+        val quality = MarketDataQuality()
+        val now = System.currentTimeMillis()
+        val checks = listOf("M15" to 900_000L, "H1" to 3_600_000L)
+        for ((timeframe, interval) in checks) {
+            val batch = try {
+                provider.fetch(symbol, timeframe, 200)
+            } catch (_: Exception) {
+                return false
+            }
+            val health = quality.validate(batch, maxOf(now, batch.fetchedAtMillis), interval)
+            if (health.health != FeedHealth.HEALTHY) return false
+            val bias = emaBias(batch.candles, 50) ?: return false
+            if (bias != direction) return false
+        }
+        return true
+    }
+
+    private fun emaBias(candles: List<Candle>, period: Int): Direction? {
+        if (candles.size < period) return null
+        val closes = candles.map { it.close }
+        val alpha = 2.0 / (period + 1.0)
+        var ema = closes.take(period).average()
+        for (close in closes.drop(period)) ema = close * alpha + ema * (1.0 - alpha)
+        val last = closes.last()
+        return when {
+            last > ema -> Direction.LONG
+            last < ema -> Direction.SHORT
+            else -> null
         }
     }
 
