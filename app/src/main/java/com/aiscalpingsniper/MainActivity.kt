@@ -2,11 +2,10 @@ package com.aiscalpingsniper
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
-import android.graphics.Color
 import android.view.Gravity
-import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -15,8 +14,11 @@ import android.widget.TextView
 import com.aiscalpingsniper.engine.CandleCsvParser
 import com.aiscalpingsniper.engine.ScannerEngine
 import com.aiscalpingsniper.engine.SetupStatus
+import java.io.ByteArrayOutputStream
 import java.text.DateFormat
-import java.util.Date\nimport java.util.TimeZone
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 class MainActivity : Activity() {
     private lateinit var symbolInput: EditText
@@ -24,6 +26,7 @@ class MainActivity : Activity() {
     private lateinit var resultText: TextView
     private val scanner = ScannerEngine()
     private val openCsvRequest = 4101
+    private val maxCsvBytes = 20 * 1024 * 1024
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -89,15 +92,30 @@ class MainActivity : Activity() {
         importAndScan(uri)
     }
 
+    private fun readCsvWithLimit(uri: Uri): String {
+        val input = contentResolver.openInputStream(uri) ?: error("Could not open the selected file.")
+        input.use { stream ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(8 * 1024)
+            var total = 0
+            while (true) {
+                val count = stream.read(buffer)
+                if (count < 0) break
+                total += count
+                require(total <= maxCsvBytes) { "CSV is larger than the 20 MB import limit." }
+                output.write(buffer, 0, count)
+            }
+            return output.toString(Charsets.UTF_8.name())
+        }
+    }
+
     private fun importAndScan(uri: Uri) {
         resultText.text = "Reading CSV…"
         try {
-            val csv = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                ?: error("Could not open the selected file.")
-            require(csv.length <= 20_000_000) { "CSV is larger than the 20 MB import limit." }
+            val csv = readCsvWithLimit(uri)
             val candles = CandleCsvParser.parse(csv)
-            val symbol = symbolInput.text.toString().trim().uppercase()
-            val timeframe = timeframeInput.text.toString().trim().uppercase()
+            val symbol = symbolInput.text.toString().trim().uppercase(Locale.ROOT)
+            val timeframe = timeframeInput.text.toString().trim().uppercase(Locale.ROOT)
             require(symbol.isNotBlank() && timeframe.isNotBlank()) { "Enter a symbol and timeframe." }
             val result = scanner.scan(symbol, timeframe, candles)
             val setup = result.setup
@@ -110,9 +128,9 @@ class MainActivity : Activity() {
                 append(result.message)
                 if (setup != null) {
                     append("\n\n${setup.direction} CANDIDATE\n")
-                    append("Entry: ${formatPrice(setup.entry)}\n")
-                    append("Stop loss: ${formatPrice(setup.stopLoss)}\n")
-                    append("Take profit: ${formatPrice(setup.takeProfit)}\n")
+                    append("Entry: ${formatPrice(symbol, setup.entry)}\n")
+                    append("Stop loss: ${formatPrice(symbol, setup.stopLoss)}\n")
+                    append("Take profit: ${formatPrice(symbol, setup.takeProfit)}\n")
                     append("Risk/reward: 1:${setup.riskReward}\n")
                     append("Rule score: ${setup.score}/100 (not win probability)\n")
                     append("Signal candle UTC: ${formatUtc(setup.signalCandleTime)}\n")
@@ -128,5 +146,19 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun formatUtc(timestamp: Long): String = DateFormat.getDateTimeInstance().apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(timestamp))\n\n    private fun formatPrice(value: Double): String = String.format(java.util.Locale.US, "%.5f", value)
+    private fun formatUtc(timestamp: Long): String =
+        DateFormat.getDateTimeInstance().apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date(timestamp))
+
+    // Display precision is a UI convention only; provider tick size must be used
+    // by future execution/risk calculations, never inferred from this formatter.
+    private fun formatPrice(symbol: String, value: Double): String {
+        val decimals = when {
+            symbol.endsWith("JPY") -> 3
+            symbol == "XAUUSD" || symbol.startsWith("XAU") -> 2
+            else -> 5
+        }
+        return String.format(Locale.US, "%.${decimals}f", value)
+    }
 }
