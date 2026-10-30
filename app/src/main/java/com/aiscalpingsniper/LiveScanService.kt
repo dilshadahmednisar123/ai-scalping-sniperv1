@@ -126,7 +126,7 @@ class LiveScanService : Service() {
     private fun cachedNewsGate(symbol: String): com.aiscalpingsniper.engine.NewsGateResult {
         val prefs = getSharedPreferences("live_scan", MODE_PRIVATE)
         if (!prefs.getBoolean("calendar_valid", false))
-            return com.aiscalpingsniper.engine.NewsGateResult(NewsGateStatus.UNKNOWN, reason = "Economic calendar unavailable; signal fail-closed.")
+            return com.aiscalpingsniper.engine.NewsGateResult(NewsGateStatus.UNKNOWN, reason = "Economic calendar unavailable; informational only unless a matching high-impact event is confirmed.")
         val rows = runCatching { JSONArray(prefs.getString("calendar_events_json", "[]")) }.getOrDefault(JSONArray())
         val events = buildList {
             for (i in 0 until rows.length()) {
@@ -146,7 +146,9 @@ class LiveScanService : Service() {
         quotes.forEach { quoteJson.put(it.toJson()) }
         prefs.edit().putString("universe_quotes_json", quoteJson.toString())
             .putLong("universe_quotes_updated_at", now)
-            .putInt("universe_live_count", quotes.count { it.state.name == "LIVE" }).apply()
+            .putInt("universe_live_count", quotes.count { it.state.name == "LIVE" })
+            .putBoolean("market_data_verified", quotes.size == symbols.size && quotes.all { it.state.name == "LIVE" })
+            .putString("scanner_status", if (quotes.size == symbols.size && quotes.all { it.state.name == "LIVE" }) "VERIFIED • SCANNING ACTIVE" else "PARTIAL • SCANNING ACTIVE").apply()
 
         // Scan all requested instruments on M5. Quote snapshots are batched;
         // candle and entry validation remains per-symbol and strict.
@@ -174,7 +176,7 @@ class LiveScanService : Service() {
             if (abs(liveMid - setup.entry) > maxEntryDrift) return@forEach
             if (!higherTimeframesAgree(setup.direction, setup.symbol)) return@forEach
             val news = cachedNewsGate(setup.symbol)
-            if (news.status != NewsGateStatus.CLEAR) {
+            if (news.status == NewsGateStatus.NEWS_RESTRICTED) {
                 prefs.edit().putString("signal_gate_" + setup.symbol, news.status.name + ": " + news.reason).apply()
                 return@forEach
             }
