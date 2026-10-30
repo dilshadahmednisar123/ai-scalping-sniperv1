@@ -19,6 +19,13 @@ import com.aiscalpingsniper.engine.WatchlistInstrument
 import com.aiscalpingsniper.engine.WatchlistScanner
 import com.aiscalpingsniper.engine.LiveQuoteFeed
 import com.aiscalpingsniper.engine.MarketUniverse
+import com.aiscalpingsniper.engine.SevenTimeframeCollector
+import com.aiscalpingsniper.engine.BiquoteCalendarFeed
+import com.aiscalpingsniper.engine.CalendarEvent
+import com.aiscalpingsniper.engine.EconomicCalendarFilter
+import com.aiscalpingsniper.engine.NewsGateStatus
+import com.aiscalpingsniper.engine.MarketOpportunityEngine
+import org.json.JSONObject
 import org.json.JSONArray
 import kotlin.math.abs
 import java.util.concurrent.Executors
@@ -27,6 +34,7 @@ import java.util.concurrent.TimeUnit
 /** User-started foreground scanner; Android may stop it under OS background limits. */
 class LiveScanService : Service() {
     private val executor = Executors.newSingleThreadScheduledExecutor()
+    private val matrixScheduler = Executors.newSingleThreadScheduledExecutor()
     private val provider by lazy { BiquoteMarketDataProvider() }
     private val scanner by lazy { WatchlistScanner(provider) }
     private val quoteFeed by lazy { LiveQuoteFeed() }
@@ -46,6 +54,13 @@ class LiveScanService : Service() {
                     .notify(ONGOING_ID, buildOngoing("Scan cycle failed • retrying next cycle • " + detail))
             }
         }, 0, 60, TimeUnit.SECONDS)
+        // 203 OHLC frames are refreshed independently; never overlap matrix runs.
+        matrixScheduler.scheduleWithFixedDelay({
+            try { collectMatrixAndRank() } catch (error: Exception) {
+                getSharedPreferences("live_scan", MODE_PRIVATE).edit()
+                    .putString("matrix_status", "UNAVAILABLE: " + (error.message ?: "matrix scan failed").take(120)).apply()
+            }
+        }, 0, 15, TimeUnit.MINUTES)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -55,6 +70,72 @@ class LiveScanService : Service() {
             return START_NOT_STICKY
         }
         return START_STICKY
+    }
+
+    private fun collectMatrixAndRank() {
+        val prefs = getSharedPreferences("live_scan", MODE_PRIVATE)
+        val collector = SevenTimeframeCollector(provider)
+        val frames = try { collector.collect(symbols) } finally { collector.close() }
+        val byPair = frames.filter { it.status == "LIVE" }
+            .groupBy { it.symbol }
+            .mapValues { (_, rows) -> rows.associate { it.timeframe to it.candles } }
+        val report = MarketOpportunityEngine().analyze(symbols, byPair)
+        val calendar = BiquoteCalendarFeed().fetch()
+        val gate = EconomicCalendarFilter()
+        val eventsJson = JSONArray()
+        calendar.events.forEach { e -> eventsJson.put(JSONObject()
+            .put("currency", e.currency).put("title", e.title).put("impact", e.impact)
+            .put("timeMillis", e.timeMillis)) }
+        val rankedJson = JSONArray()
+        report.ranked.forEach { opportunity ->
+            val news = if (calendar.valid) gate.evaluate(opportunity.symbol, calendar.events, System.currentTimeMillis())
+                else com.aiscalpingsniper.engine.NewsGateResult(NewsGateStatus.UNKNOWN, reason = calendar.detail)
+            val item = JSONObject().put("symbol", opportunity.symbol)
+                .put("rating", opportunity.rating ?: JSONObject.NULL)
+                .put("direction", opportunity.direction?.name ?: JSONObject.NULL)
+                .put("status", when {
+                    news.status == NewsGateStatus.NEWS_RESTRICTED -> "NEWS_RESTRICTED"
+                    news.status == NewsGateStatus.UNKNOWN -> "NEWS_UNKNOWN"
+                    opportunity.setup != null -> "CANDIDATE"
+                    else -> "NO_TRADE"
+                })
+                .put("news", news.toJson())
+                .put("blockers", JSONArray(opportunity.blockers))
+                .put("reasons", JSONArray(opportunity.reasons))
+            opportunity.setup?.let { setup ->
+                val targets = com.aiscalpingsniper.engine.TargetPlan.from(setup)
+                item.put("entry", targets.entry).put("sl", targets.stopLoss)
+                    .put("tp1", targets.tp1).put("tp2", targets.tp2).put("tp3", targets.tp3)
+                    .put("rr", setup.riskReward)
+            }
+            rankedJson.put(item)
+        }
+        val liveFrames = frames.count { it.status == "LIVE" }
+        prefs.edit().putString("matrix_opportunities_json", rankedJson.toString())
+            .putString("calendar_events_json", eventsJson.toString())
+            .putBoolean("calendar_valid", calendar.valid)
+            .putLong("matrix_updated_at", System.currentTimeMillis())
+            .putInt("matrix_healthy_frames", liveFrames)
+            .putInt("matrix_total_frames", symbols.size * MarketUniverse.timeframes.size)
+            .putString("matrix_status", report.decision + " • " + liveFrames + "/" +
+                (symbols.size * MarketUniverse.timeframes.size) + " frames • Calendar " +
+                if (calendar.valid) "VALID" else "UNKNOWN")
+            .apply()
+    }
+
+    private fun cachedNewsGate(symbol: String): com.aiscalpingsniper.engine.NewsGateResult {
+        val prefs = getSharedPreferences("live_scan", MODE_PRIVATE)
+        if (!prefs.getBoolean("calendar_valid", false))
+            return com.aiscalpingsniper.engine.NewsGateResult(NewsGateStatus.UNKNOWN, reason = "Economic calendar unavailable; signal fail-closed.")
+        val rows = runCatching { JSONArray(prefs.getString("calendar_events_json", "[]")) }.getOrDefault(JSONArray())
+        val events = buildList {
+            for (i in 0 until rows.length()) {
+                val row = rows.optJSONObject(i) ?: continue
+                add(CalendarEvent(row.optString("currency"), row.optString("title"),
+                    row.optString("impact"), row.optLong("timeMillis")))
+            }
+        }
+        return EconomicCalendarFilter().evaluate(symbol, events, System.currentTimeMillis())
     }
 
     private fun scanOnce() {
@@ -92,6 +173,11 @@ class LiveScanService : Service() {
             val maxEntryDrift = abs(setup.entry - setup.stopLoss) * 0.25
             if (abs(liveMid - setup.entry) > maxEntryDrift) return@forEach
             if (!higherTimeframesAgree(setup.direction, setup.symbol)) return@forEach
+            val news = cachedNewsGate(setup.symbol)
+            if (news.status != NewsGateStatus.CLEAR) {
+                prefs.edit().putString("signal_gate_" + setup.symbol, news.status.name + ": " + news.reason).apply()
+                return@forEach
+            }
             val key = setup.symbol + "|" + setup.timeframe + "|" + setup.direction + "|" + setup.signalCandleTime
             if (prefs.getString("last_signal_" + key, null) == "sent") return@forEach
             val title = setup.symbol + " " + setup.direction + " setup"
@@ -188,6 +274,7 @@ class LiveScanService : Service() {
 
     override fun onDestroy() {
         executor.shutdownNow()
+        matrixScheduler.shutdownNow()
         super.onDestroy()
     }
 

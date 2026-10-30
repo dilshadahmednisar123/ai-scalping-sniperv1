@@ -89,6 +89,36 @@ class BiquoteMarketDataProvider(
         )
     }
 
+    /** OHLC-only path for matrix scans; avoids one redundant quote request per timeframe. */
+    fun fetchCandles(symbol: String, timeframe: String, limit: Int = 200): List<Candle> {
+        require(symbol.matches(Regex("[A-Za-z0-9._-]{3,20}")))
+        require(limit in 60..1000)
+        val interval = when (timeframe.uppercase(Locale.ROOT)) {
+            "M1" -> "1m"; "M5" -> "5m"; "M15" -> "15m"; "M30" -> "30m"
+            "H1", "1H" -> "1h"; "H4", "4H" -> "4h"; "D1", "1D" -> "1d"
+            else -> throw IllegalArgumentException("Unsupported timeframe: $timeframe")
+        }
+        val json = requestJson("https://biquote.io/api/$symbol/ohlc?interval=$interval&limit=$limit")
+        require(json.optString("symbol").equals(symbol, true)) { "Provider symbol mismatch." }
+        require(json.optString("interval") == interval) { "Provider timeframe mismatch." }
+        val bars = json.optJSONArray("bars") ?: error("Provider response has no bars array.")
+        val candles = buildList {
+            for (i in 0 until bars.length()) {
+                val bar = bars.optJSONObject(i) ?: continue
+                if (bar.optBoolean("isOpen", false)) continue
+                val timestamp = Instant.parse(bar.getString("openTime")).toEpochMilli()
+                add(Candle(timestamp, bar.getDouble("open"), bar.getDouble("high"),
+                    bar.getDouble("low"), bar.getDouble("close"),
+                    bar.optDouble("tickVolume", bar.optDouble("volume", 0.0))))
+            }
+        }.sortedBy { it.timestamp }
+        require(candles.size >= 60) { "Only ${candles.size} closed candles returned; need at least 60." }
+        require(candles.zipWithNext().all { it.first.timestamp < it.second.timestamp }) {
+            "Provider returned duplicate or unordered candle timestamps."
+        }
+        return candles
+    }
+
     private fun requestJson(address: String): JSONObject {
         val connection = (URL(address).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"

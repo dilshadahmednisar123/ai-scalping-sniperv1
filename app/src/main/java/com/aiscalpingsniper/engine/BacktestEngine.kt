@@ -6,12 +6,23 @@ import kotlin.math.max
 data class BacktestConfig(
     val maxBarsInTrade: Int = 48,
     /** Estimated adverse price movement on each side of a round trip. */
-    val executionCostPerSide: Double = 0.0
+    val executionCostPerSide: Double = 0.0,
+    /** Full quoted spread in price units, charged half on each side. */
+    val spreadPrice: Double = 0.0,
+    /** Adverse slippage in price units per side. */
+    val slippagePricePerSide: Double = 0.0,
+    /** Commission converted to price units for the tested position size, round trip. */
+    val commissionPriceEquivalentRoundTrip: Double = 0.0
 ) {
     init {
         require(maxBarsInTrade >= 1)
-        require(executionCostPerSide.isFinite() && executionCostPerSide >= 0.0)
+        require(listOf(executionCostPerSide, spreadPrice, slippagePricePerSide,
+            commissionPriceEquivalentRoundTrip).all { it.isFinite() && it >= 0.0 })
     }
+    /** All modeled friction, per side, in the same price units as OHLC. */
+    val totalCostPerSide: Double
+        get() = executionCostPerSide + spreadPrice / 2.0 +
+            slippagePricePerSide + commissionPriceEquivalentRoundTrip / 2.0
 }
 
 enum class ExitReason { STOP_LOSS, TAKE_PROFIT, TIME_EXIT }
@@ -71,7 +82,7 @@ class BacktestEngine(
             val entryBar = candles[entryIndex]
             // Signal is known at the previous close; fill only at the next bar open.
             val entryFill = if (setup.direction == Direction.LONG) {
-                entryBar.open + config.executionCostPerSide
+                entryBar.open + config.totalCostPerSide
             } else {
                 entryBar.open - config.executionCostPerSide
             }

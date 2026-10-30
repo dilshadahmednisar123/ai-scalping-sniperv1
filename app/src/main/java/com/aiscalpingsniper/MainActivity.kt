@@ -235,6 +235,20 @@ class MainActivity : Activity() {
             watchlistPanel.addView(line)
             if (index != MarketUniverse.forexPairs.lastIndex) watchlistPanel.addView(separator())
         }
+        if (::scanStatus.isInitialized) {
+            val opportunities = runCatching {
+                JSONArray(prefs.getString("matrix_opportunities_json", "[]"))
+            }.getOrDefault(JSONArray())
+            val top = (0 until opportunities.length()).mapNotNull { opportunities.optJSONObject(it) }
+                .take(5)
+            scanStatus.text = if (top.isEmpty()) {
+                prefs.getString("matrix_status", "NO TRADE - WAIT • 7-timeframe matrix pending") ?: "NO TRADE - WAIT"
+            } else top.joinToString("\\n") { item ->
+                val rating = if (item.isNull("rating")) "—" else item.optDouble("rating").toString() + "/10"
+                item.optString("symbol") + " • " + rating + " • " + item.optString("direction", "—") +
+                    " • " + item.optString("status", "UNAVAILABLE")
+            } + "\\n" + (prefs.getString("matrix_status", "Matrix updating") ?: "Matrix updating")
+        }
         val updated = prefs.getLong("universe_quotes_updated_at", 0L)
         if (updated > 0L) {
             feedStatus.text = "Quote snapshot updated " + DateFormat.getTimeInstance(DateFormat.MEDIUM)
