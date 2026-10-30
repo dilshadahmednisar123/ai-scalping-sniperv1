@@ -16,7 +16,7 @@ import com.aiscalpingsniper.engine.CandleCsvParser
 import com.aiscalpingsniper.engine.ScannerEngine
 import com.aiscalpingsniper.engine.SetupStatus
 import java.text.DateFormat
-import java.util.Date
+import java.util.Date\nimport java.util.TimeZone
 
 class MainActivity : Activity() {
     private lateinit var symbolInput: EditText
@@ -104,7 +104,7 @@ class MainActivity : Activity() {
             val report = buildString {
                 append("DATA SOURCE: IMPORTED CSV (HISTORICAL)\n")
                 append("CANDLES LOADED: ${candles.size}\n")
-                append("LAST CANDLE (UTC): ${DateFormat.getDateTimeInstance().format(Date(candles.last().timestamp))}\n")
+                append("LAST CANDLE (UTC): ${formatUtc(candles.last().timestamp)}\n")
                 append("SYMBOL / TF: $symbol / $timeframe\n\n")
                 append("SCAN STATUS: ${result.status}\n")
                 append(result.message)
@@ -115,7 +115,7 @@ class MainActivity : Activity() {
                     append("Take profit: ${formatPrice(setup.takeProfit)}\n")
                     append("Risk/reward: 1:${setup.riskReward}\n")
                     append("Rule score: ${setup.score}/100 (not win probability)\n")
-                    append("Signal candle UTC: ${DateFormat.getDateTimeInstance().format(Date(setup.signalCandleTime))}\n")
+                    append("Signal candle UTC: ${formatUtc(setup.signalCandleTime)}\n")
                     append("\nReasons:\n• " + setup.reasons.joinToString("\n• "))
                 }
                 append("\n\nHISTORICAL IMPORT ONLY — no live feed or automatic trade execution.")
@@ -128,5 +128,5 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun formatPrice(value: Double): String = String.format(java.util.Locale.US, "%.5f", value)
+    private fun formatUtc(timestamp: Long): String = DateFormat.getDateTimeInstance().apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(timestamp))\n\n    private fun formatPrice(value: Double): String = String.format(java.util.Locale.US, "%.5f", value)
 }
