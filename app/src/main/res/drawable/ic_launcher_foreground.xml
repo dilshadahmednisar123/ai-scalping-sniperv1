@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Soft reticle halo -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,25 A29,29 0,1 1,53.9 25"
+        android:strokeColor="#3332F5D0"
+        android:strokeWidth="7" />
+    <!-- Main precision reticle -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,29 A25,25 0,1 1,53.9 29"
+        android:strokeColor="#32F5D0"
+        android:strokeWidth="2.4" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,18 L54,38 M54,70 L54,90 M18,54 L38,54 M70,54 L90,54"
+        android:strokeColor="#32F5D0"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round" />
+    <path
+        android:fillColor="#32F5D0"
+        android:pathData="M57.2,54 A3.2,3.2 0,1 1,50.8 54 A3.2,3.2 0,1 1,57.2 54" />
+    <path
+        android:fillColor="#E8FFFA"
+        android:pathData="M55.1,54 A1.1,1.1 0,1 1,52.9 54 A1.1,1.1 0,1 1,55.1 54" />
+    <!-- Candlestick bodies -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M34,65 L34,48 M34,53 L34,61 M44,72 L44,42 M44,48 L44,65 M64,67 L64,39 M64,45 L64,59 M74,59 L74,32"
+        android:strokeColor="#36D9B2"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round" />
+    <path
+        android:fillColor="#36D9B2"
+        android:pathData="M31,53h6v8h-6z M41,48h6v17h-6z M61,45h6v14h-6z M71,32h6v14h-6z" />
+    <!-- Rising price vector -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M27,76 L40,68 L51,72 L63,54 L76,48 L84,34"
+        android:strokeColor="#39BFFF"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:fillColor="#39BFFF"
+        android:pathData="M78,34 L86,31 L84,40 Z" />
+</vector>
