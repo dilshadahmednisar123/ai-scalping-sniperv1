@@ -5,11 +5,16 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.time.Instant
 import java.util.Locale
+import kotlin.math.abs
 
-/** Experimental adapter for biquote.io's public OHLC endpoint; no API key required. */
+/**
+ * Experimental adapter for biquote.io public read-only endpoints.
+ * Requires both closed OHLC candles and a fresh bid/ask tick; no API key required.
+ */
 class BiquoteMarketDataProvider(
     private val connectTimeoutMillis: Int = 10_000,
-    private val readTimeoutMillis: Int = 15_000
+    private val readTimeoutMillis: Int = 15_000,
+    private val maxTickAgeMillis: Long = 90_000L
 ) : MarketDataProvider {
     override fun fetch(symbol: String, timeframe: String, limit: Int): MarketDataBatch {
         require(symbol.matches(Regex("[A-Za-z0-9._-]{3,20}"))) { "Invalid market symbol." }
@@ -22,10 +27,55 @@ class BiquoteMarketDataProvider(
             "H1", "1H" -> "1h"
             "H4", "4H" -> "4h"
             "D1", "1D" -> "1d"
-            else -> throw IllegalArgumentException("Unsupported timeframe: $timeframe")
+            else -> throw IllegalArgumentException("Unsupported timeframe: " + timeframe)
         }
-        val endpoint = URL("https://biquote.io/api/$symbol/ohlc?interval=$interval&limit=$limit")
-        val connection = (endpoint.openConnection() as HttpURLConnection).apply {
+
+        val ohlc = requestJson("https://biquote.io/api/" + symbol + "/ohlc?interval=" + interval + "&limit=" + limit)
+        val returnedSymbol = ohlc.optString("symbol")
+        require(returnedSymbol.equals(symbol, ignoreCase = true)) { "Provider symbol mismatch." }
+        require(ohlc.optString("interval") == interval) { "Provider timeframe mismatch." }
+        val bars = ohlc.optJSONArray("bars") ?: error("Provider response has no bars array.")
+        val candles = buildList {
+            for (i in 0 until bars.length()) {
+                val bar = bars.optJSONObject(i) ?: continue
+                if (bar.optBoolean("isOpen", false)) continue
+                val timestamp = Instant.parse(bar.getString("openTime")).toEpochMilli()
+                add(Candle(
+                    timestamp, bar.getDouble("open"), bar.getDouble("high"),
+                    bar.getDouble("low"), bar.getDouble("close"),
+                    bar.optDouble("tickVolume", bar.optDouble("volume", 0.0))
+                ))
+            }
+        }.sortedBy { it.timestamp }
+        require(candles.size >= 60) { "Only " + candles.size + " closed candles returned; need at least 60." }
+        require(candles.zipWithNext().all { it.first.timestamp < it.second.timestamp }) {
+            "Provider returned duplicate or unordered candle timestamps."
+        }
+
+        val tick = requestJson("https://biquote.io/api/" + symbol)
+        require(tick.optString("symbol").equals(symbol, ignoreCase = true)) { "Tick symbol mismatch." }
+        val bid = tick.getDouble("bid")
+        val ask = tick.getDouble("ask")
+        require(bid.isFinite() && ask.isFinite() && bid > 0.0 && ask >= bid) {
+            "Provider returned invalid bid/ask prices."
+        }
+        val tickTime = Instant.parse(tick.getString("time")).toEpochMilli()
+        val fetchedAt = System.currentTimeMillis()
+        require(tickTime <= fetchedAt + 5_000L) { "Provider tick timestamp is in the future." }
+        require(fetchedAt - tickTime <= maxTickAgeMillis) { "Provider bid/ask tick is stale." }
+
+        return MarketDataBatch(
+            source = "biquote.io experimental public feed",
+            symbol = returnedSymbol,
+            timeframe = timeframe.uppercase(Locale.ROOT),
+            fetchedAtMillis = fetchedAt,
+            candles = candles,
+            spread = abs(ask - bid)
+        )
+    }
+
+    private fun requestJson(address: String): JSONObject {
+        val connection = (URL(address).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = connectTimeoutMillis
             readTimeout = readTimeoutMillis
@@ -36,34 +86,8 @@ class BiquoteMarketDataProvider(
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            check(code in 200..299) { "Market feed HTTP $code: " + body.take(180) }
-            val root = JSONObject(body)
-            val returnedSymbol = root.optString("symbol")
-            val returnedInterval = root.optString("interval")
-            check(returnedSymbol.equals(symbol, ignoreCase = true)) { "Provider symbol mismatch." }
-            check(returnedInterval == interval) { "Provider timeframe mismatch." }
-            val bars = root.optJSONArray("bars") ?: error("Provider response has no bars array.")
-            val candles = buildList {
-                for (i in 0 until bars.length()) {
-                    val bar = bars.optJSONObject(i) ?: continue
-                    if (bar.optBoolean("isOpen", false)) continue
-                    val timestamp = Instant.parse(bar.getString("openTime")).toEpochMilli()
-                    add(Candle(timestamp, bar.getDouble("open"), bar.getDouble("high"),
-                        bar.getDouble("low"), bar.getDouble("close"),
-                        bar.optDouble("tickVolume", bar.optDouble("volume", 0.0))))
-                }
-            }.sortedBy { it.timestamp }
-            check(candles.size >= 60) { "Only " + candles.size + " closed candles returned; need at least 60." }
-            check(candles.zipWithNext().all { it.first.timestamp < it.second.timestamp }) {
-                "Provider returned duplicate or unordered candle timestamps."
-            }
-            return MarketDataBatch(
-                source = "biquote.io experimental public feed",
-                symbol = returnedSymbol,
-                timeframe = timeframe.uppercase(Locale.ROOT),
-                fetchedAtMillis = System.currentTimeMillis(),
-                candles = candles
-            )
+            check(code in 200..299) { "Market feed HTTP " + code + ": " + body.take(180) }
+            return JSONObject(body)
         } finally {
             connection.disconnect()
         }
