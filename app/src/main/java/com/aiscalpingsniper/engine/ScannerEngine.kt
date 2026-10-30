@@ -72,20 +72,27 @@ data class ScannerConfig(
 }
 
 class ScannerEngine(private val config: ScannerConfig = ScannerConfig()) {
-    fun scan(symbol: String, timeframe: String, candles: List<Candle>): ScanResult {
+    fun scan(
+        symbol: String,
+        timeframe: String,
+        closedCandles: List<Candle>,
+        formingCandle: Candle? = null
+    ): ScanResult {
         val required = max(config.emaPeriod, config.atrPeriod) + config.pivotLeft + config.pivotRight + 5
-        if (candles.size < required) {
-            return ScanResult(SetupStatus.NONE, message = "Need at least $required closed candles; received ${candles.size}.")
+        if (closedCandles.size < required) {
+            return ScanResult(SetupStatus.NONE, message = "Need at least $required closed candles; received ${closedCandles.size}.")
         }
-        if (candles.zipWithNext().any { it.first.timestamp >= it.second.timestamp }) {
+        if (closedCandles.zipWithNext().any { it.first.timestamp >= it.second.timestamp }) {
             return ScanResult(SetupStatus.NONE, message = "Candles must be strictly chronological.")
         }
 
-        // Exclude the last candle: callers may include a still-forming candle.
-        val bars = candles.dropLast(1)
-        if (bars.size < required - 1) {
-            return ScanResult(SetupStatus.NONE, message = "Not enough confirmed candles.")
+        if (formingCandle != null && closedCandles.last().timestamp >= formingCandle.timestamp) {
+            return ScanResult(SetupStatus.NONE, message = "The forming candle must be newer than the last closed candle.")
         }
+
+        // The caller explicitly separates closed data from the optional live candle.
+        // Never silently discard a valid final closed candle.
+        val bars = closedCandles
 
         val closes = bars.map { it.close }
         val ema = ema(closes, config.emaPeriod)
