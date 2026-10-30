@@ -29,7 +29,15 @@ class BacktestEngineTest {
 
     @Test(expected = IllegalArgumentException::class)
     fun rejectsNegativeExecutionCost() {
-        BacktestConfig(executionCostPerSide = -0.0001)
+        BacktestConfig(slippagePipsPerSide = -0.0001)
+    }
+
+    @Test
+    fun standardFrictionPresetsAreAppliedInPipUnits() {
+        val config = BacktestConfig()
+        assertEquals(0.00006, config.costPerSide("EURUSD"), 1e-10)
+        assertEquals(0.006, config.costPerSide("USDJPY"), 1e-10)
+        assertEquals(0.06, config.costPerSide("XAUUSD"), 1e-10)
     }
 
     @Test
