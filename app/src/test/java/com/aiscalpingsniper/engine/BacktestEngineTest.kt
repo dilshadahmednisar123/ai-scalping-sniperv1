@@ -35,9 +35,9 @@ class BacktestEngineTest {
     @Test
     fun standardFrictionPresetsAreAppliedInPipUnits() {
         val config = BacktestConfig()
-        assertEquals(0.00006, config.costPerSide("EURUSD"), 1e-10)
-        assertEquals(0.006, config.costPerSide("USDJPY"), 1e-10)
-        assertEquals(0.06, config.costPerSide("XAUUSD"), 1e-10)
+        assertEquals(0.000145, config.costPerSide("EURUSD"), 1e-10)
+        assertEquals(0.0145, config.costPerSide("USDJPY"), 1e-10)
+        assertEquals(0.145, config.costPerSide("XAUUSD"), 1e-10)
     }
 
     @Test
