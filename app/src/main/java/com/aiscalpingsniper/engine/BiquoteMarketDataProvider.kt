@@ -70,7 +70,7 @@ class BiquoteMarketDataProvider(
         }
         require(!tick.optBoolean("stale", true)) { "Provider marked the bid/ask tick stale." }
         val reportedAgeSeconds = tick.optLong("quoteAgeSeconds", Long.MAX_VALUE)
-        require(reportedAgeSeconds >= 0 && reportedAgeSeconds * 1_000L <= maxTickAgeMillis) {
+        require(reportedAgeSeconds in 0..(maxTickAgeMillis / 1_000L)) {
             "Provider reports a stale bid/ask tick."
         }
         require(tickTime <= fetchedAt + 5_000L) { "Provider tick timestamp is in the future." }
