@@ -70,7 +70,7 @@ class LiveScanService : Service() {
         // Scan all requested instruments on M5. Quote snapshots are batched;
         // candle and entry validation remains per-symbol and strict.
         val watchlist = symbols.map { WatchlistInstrument(it, "M5", 300_000L) }
-        val scan = scanner.scan(watchlist, now, candleLimit = 200)
+        val scan = scanner.scan(watchlist, System.currentTimeMillis(), candleLimit = 200)
         val healthy = scan.items.count { it.feedCheck.health == FeedHealth.HEALTHY }
         val failures = scan.items.filter { it.feedCheck.health != FeedHealth.HEALTHY }
         val clock = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
