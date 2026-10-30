@@ -24,7 +24,11 @@ class WatchlistScannerTest {
             symbol = symbol,
             timeframe = "M5",
             fetchedAtMillis = now - 1_000L,
-            candles = data
+            candles = data,
+            spread = 0.0001,
+            bid = data.last().close - 0.00005,
+            ask = data.last().close + 0.00005,
+            tickTimestampMillis = now - 500L
         )
     }
 
