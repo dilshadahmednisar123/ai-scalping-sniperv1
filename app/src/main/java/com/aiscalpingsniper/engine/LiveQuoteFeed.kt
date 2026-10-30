@@ -77,7 +77,10 @@ class LiveQuoteFeed(
             // A valid batch quote wins over a failed fallback; otherwise preserve
             // the fallback's explicit stale/closed/unavailable reason.
             val current = bySymbol[symbol]
-            if (current == null || current.state != QuoteState.LIVE) bySymbol[symbol] = fallback
+            if (fallback.state == QuoteState.LIVE || current == null ||
+                current.state == QuoteState.INVALID || current.state == QuoteState.UNAVAILABLE) {
+                bySymbol[symbol] = fallback
+            }
         }
         return symbols.map { bySymbol[it] ?: LiveQuote(
             it, null, null, null, null, null, nowMillis, null,
@@ -90,13 +93,23 @@ class LiveQuoteFeed(
             json.optJSONArray("items") != null -> json.getJSONArray("items")
             json.optJSONArray("data") != null -> json.getJSONArray("data")
             json.optJSONArray("quotes") != null -> json.getJSONArray("quotes")
-            else -> JSONArray()
+            else -> null
         }
         val result = linkedMapOf<String, LiveQuote>()
-        for (i in 0 until array.length()) {
-            val item = array.optJSONObject(i) ?: continue
-            val symbol = item.optString("symbol").uppercase(Locale.ROOT)
-            if (symbol.isNotBlank()) result[symbol] = parseQuote(item, symbol, now)
+        if (array != null) {
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val symbol = item.optString("symbol").uppercase(Locale.ROOT)
+                if (symbol.isNotBlank()) result[symbol] = parseQuote(item, symbol, now)
+            }
+        } else {
+            // /api/latest returns an object keyed by symbol.
+            val keys = json.keys()
+            while (keys.hasNext()) {
+                val symbol = keys.next().uppercase(Locale.ROOT)
+                val item = json.optJSONObject(symbol) ?: continue
+                result[symbol] = parseQuote(item, symbol, now)
+            }
         }
         return result
     }
