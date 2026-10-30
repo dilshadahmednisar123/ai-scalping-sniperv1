@@ -21,6 +21,10 @@ data class Candle(
     val volume: Double = 0.0
 ) {
     init {
+        require(listOf(open, high, low, close, volume).all { it.isFinite() }) {
+            "OHLCV values must be finite."
+        }
+        require(volume >= 0.0) { "Volume cannot be negative." }
         require(high >= max(open, close) && low <= min(open, close))
         require(high >= low)
     }
@@ -61,8 +65,9 @@ data class ScannerConfig(
     init {
         require(emaPeriod >= 2 && atrPeriod >= 2)
         require(pivotLeft >= 1 && pivotRight >= 1)
-        require(zoneAtrFraction > 0 && stopAtrBuffer >= 0)
-        require(rewardRisk > 0 && minimumScore in 1..100)
+        require(zoneAtrFraction.isFinite() && zoneAtrFraction > 0)
+        require(stopAtrBuffer.isFinite() && stopAtrBuffer >= 0)
+        require(rewardRisk.isFinite() && rewardRisk > 0 && minimumScore in 1..100)
     }
 }
 
