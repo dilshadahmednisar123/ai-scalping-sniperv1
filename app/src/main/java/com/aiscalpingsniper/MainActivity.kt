@@ -105,7 +105,7 @@ class MainActivity : Activity() {
                 require(total <= maxCsvBytes) { "CSV is larger than the 20 MB import limit." }
                 output.write(buffer, 0, count)
             }
-            return output.toString(Charsets.UTF_8.name())
+            return String(output.toByteArray(), Charsets.UTF_8)
         }
     }
 
