@@ -119,8 +119,21 @@ class ScannerEngine(private val config: ScannerConfig = ScannerConfig()) {
             return ScanResult(SetupStatus.NONE, message = "Invalid risk distance; setup rejected.")
         }
         val target = if (direction == Direction.LONG) entry + risk * config.rewardRisk else entry - risk * config.rewardRisk
-        val score = (50 + (if (nearSupport || nearResistance) 15 else 0) +
-            (if (bullishTrend || bearishTrend) 15 else 0) + 20).coerceIn(0, 100)
+        // A transparent rule score, not a win probability. Each component
+        // varies with the actual setup quality rather than being always maxed.
+        val candleRange = max(last.high - last.low, 1e-12)
+        val bodyRatio = abs(last.close - last.open) / candleRange
+        val levelDistance = if (direction == Direction.LONG) {
+            abs(last.low - level)
+        } else {
+            abs(last.high - level)
+        }
+        val proximityScore = (20.0 * (1.0 - levelDistance / (atr * config.zoneAtrFraction)))
+            .coerceIn(0.0, 20.0).toInt()
+        val trendDistance = abs(last.close - ema) / atr
+        val trendScore = (15.0 * (trendDistance / 1.5)).coerceIn(0.0, 15.0).toInt()
+        val candleScore = (20.0 * bodyRatio).coerceIn(0.0, 20.0).toInt()
+        val score = (45 + proximityScore + trendScore + candleScore).coerceIn(0, 100)
         val reasons = listOf(
             if (direction == Direction.LONG) "Price is above EMA trend filter" else "Price is below EMA trend filter",
             if (direction == Direction.LONG) "Retest of confirmed support" else "Retest of confirmed resistance",
