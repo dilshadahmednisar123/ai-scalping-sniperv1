@@ -1,9 +1,5 @@
 package com.aiscalpingsniper.engine
 
-/**
- * Adapter contract for a real market-data source. Implementations must return
- * actual provider candles and must not synthesize missing prices.
- */
 interface MarketDataProvider {
     fun fetch(symbol: String, timeframe: String, limit: Int): MarketDataBatch
 }
@@ -17,8 +13,7 @@ data class WatchlistInstrument(
         require(symbol.isNotBlank() && timeframe.isNotBlank())
         require(expectedIntervalMillis > 0)
     }
-
-    val key: String get() = "${symbol.trim().uppercase()}|${timeframe.trim().uppercase()}"
+    val key: String get() = symbol.trim().uppercase() + "|" + timeframe.trim().uppercase()
 }
 
 data class InstrumentScan(
@@ -27,20 +22,13 @@ data class InstrumentScan(
     val scanResult: ScanResult? = null
 )
 
-data class WatchlistScan(
-    val scannedAtMillis: Long,
-    val items: List<InstrumentScan>
-) {
+data class WatchlistScan(val scannedAtMillis: Long, val items: List<InstrumentScan>) {
     val confirmedSetups: List<TradeSetup>
         get() = items.mapNotNull { item ->
             item.scanResult?.takeIf { it.status == SetupStatus.CONFIRMED }?.setup
         }
 }
 
-/**
- * Isolates provider failures per instrument, validates each returned batch,
- * and only passes healthy feeds to the deterministic closed-candle engine.
- */
 class WatchlistScanner(
     private val provider: MarketDataProvider,
     private val scanner: ScannerEngine = ScannerEngine(),
@@ -60,7 +48,9 @@ class WatchlistScanner(
         val results = watchlist.map { instrument ->
             try {
                 val batch = provider.fetch(instrument.symbol, instrument.timeframe, candleLimit)
-                // A provider timestamps its batch when the response completes, which can\n                // be later than the scan cycle start. Validate against the later instant.\n                val validationTime = maxOf(nowMillis, batch.fetchedAtMillis)\n                val health = quality.validate(batch, validationTime, instrument.expectedIntervalMillis)
+                // Network response timestamps may be later than the scan-cycle start.
+                val validationTime = maxOf(nowMillis, batch.fetchedAtMillis)
+                val health = quality.validate(batch, validationTime, instrument.expectedIntervalMillis)
                 if (health.health != FeedHealth.HEALTHY) {
                     InstrumentScan(instrument, health)
                 } else if (!batch.symbol.equals(instrument.symbol, ignoreCase = true) ||
@@ -81,7 +71,7 @@ class WatchlistScanner(
                     instrument,
                     FeedCheck(
                         FeedHealth.INVALID,
-                        "Market-data request failed: ${error.message ?: error::class.java.simpleName}"
+                        "Market-data request failed: " + (error.message ?: error::class.java.simpleName)
                     )
                 )
             }
