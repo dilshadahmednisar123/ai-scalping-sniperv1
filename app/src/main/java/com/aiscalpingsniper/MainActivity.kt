@@ -62,6 +62,9 @@ class MainActivity : Activity() {
     }
 
     private fun buildDashboard() {
+        // Retain default metadata for CSV analysis without exposing manual scan controls.
+        symbolInput = field("EURUSD")
+        timeframeInput = field("M5")
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bg)
@@ -153,19 +156,6 @@ class MainActivity : Activity() {
         signal.addView(label("Evidence framework", 11, blue, true))
         signal.addView(label("Liquidity sweep  •  BOS / MSS  •  FVG  •  S/R  •  EMA trend  •  ATR risk", 11, muted))
         page.addView(signal)
-
-        page.addView(sectionHeader("SCAN CONFIGURATION", "MANUAL CONTROLS"))
-        val config = card()
-        config.addView(label("Symbol", 11, muted, true))
-        symbolInput = field("EURUSD")
-        config.addView(symbolInput)
-        config.addView(space(9))
-        config.addView(label("Timeframe", 11, muted, true))
-        timeframeInput = field("M5")
-        config.addView(timeframeInput)
-        config.addView(space(10))
-        config.addView(label("The background scanner currently uses its fixed four-symbol M5 watchlist. These fields apply to CSV analysis and backtesting.", 11, muted))
-        page.addView(config)
 
         page.addView(sectionHeader("RESEARCH & VALIDATION", "HISTORICAL DATA"))
         val tools = card()
@@ -377,6 +367,7 @@ class MainActivity : Activity() {
                 append("\nExpectancy: " + report.expectancyR + "R | Profit factor: " + report.profitFactor)
                 append("\nMax drawdown: " + report.maxDrawdownR + "R")
                 append("\nNext-bar open fills; stop-first on ambiguous candles.")
+                append("\nCosts currently assumed ZERO: spread, commission, swaps and slippage are excluded. Results are optimistic, not execution-realistic.")
                 append("\nHistorical results do not predict future performance.")
             }
             updateStatus("BACKTEST COMPLETE • HISTORICAL DATA ONLY", blue)
