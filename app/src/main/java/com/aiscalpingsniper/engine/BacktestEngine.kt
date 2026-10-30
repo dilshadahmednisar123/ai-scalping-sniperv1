@@ -69,12 +69,13 @@ class BacktestEngine(
                 break
             }
             val entryBar = candles[entryIndex]
+            // Signal is known at the previous close; fill only at the next bar open.
             val entryFill = if (setup.direction == Direction.LONG) {
-                setup.entry + config.executionCostPerSide
+                entryBar.open + config.executionCostPerSide
             } else {
-                setup.entry - config.executionCostPerSide
+                entryBar.open - config.executionCostPerSide
             }
-            val exit = resolveExit(setup, entryBar, candles, entryIndex, config)
+            val exit = resolveExit(setup, candles, entryIndex, config)
             if (exit == null) {
                 skipped++
                 index++
@@ -134,7 +135,6 @@ class BacktestEngine(
 
     private fun resolveExit(
         setup: TradeSetup,
-        entryBar: Candle,
         candles: List<Candle>,
         entryIndex: Int,
         config: BacktestConfig
